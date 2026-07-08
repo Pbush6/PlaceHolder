@@ -28,10 +28,13 @@ function Get-DefaultOutputDirectory {
 }
 
 function New-EmbeddedCoreScript {
+    # Decode first so a corrupt/incomplete payload fails before any temp dir is created (no leak).
+    try { $coreBytes = [Convert]::FromBase64String($script:EmbeddedCoreBase64) }
+    catch { throw 'The packaged converter is corrupted or incomplete. Please reinstall the application.' }
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('PurviewTeamsPstToHtml_' + [guid]::NewGuid().ToString('N'))
-    New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+    [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
     $corePath = Join-Path $tempRoot 'Convert-PurviewTeamsPstToHtml.ps1'
-    [IO.File]::WriteAllBytes($corePath, [Convert]::FromBase64String($script:EmbeddedCoreBase64))
+    [IO.File]::WriteAllBytes($corePath, $coreBytes)
     return $corePath
 }
 
