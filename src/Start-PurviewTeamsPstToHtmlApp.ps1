@@ -639,7 +639,7 @@ function Start-GuiMode {
                     $detail = ''
                     if (Test-Path -LiteralPath $script:activeConversion.LogPath) {
                         try {
-                            $recentLog = Get-Content -LiteralPath $script:activeConversion.LogPath -Tail 80 -ErrorAction Stop
+                            $recentLog = Get-Content -LiteralPath $script:activeConversion.LogPath -Tail 80 -Encoding UTF8 -ErrorAction Stop
                             $fatalLine = @($recentLog | Where-Object { $_ -match '\[(ERROR)\] Fatal error:' } | Select-Object -Last 1)
                             if ($fatalLine -and $fatalLine[0]) { $detail = "`n`nLog detail:`n$($fatalLine[0])" }
                         }
