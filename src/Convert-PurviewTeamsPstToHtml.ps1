@@ -46,7 +46,13 @@ param(
 
     # Packaging-friendly mode: fail clearly instead of prompting when required inputs are missing.
     [Parameter(Mandatory = $false)]
-    [switch]$NoPrompt
+    [switch]$NoPrompt,
+
+    # Optional correlation id. When non-empty, every machine-readable stdout line
+    # (CONVERSION_PROGRESS / CONVERSION_STAGE / CONVERSION_RESULT) carries RunId=<id>
+    # so the GUI can ignore any line not tagged with the current run's id.
+    [Parameter(Mandatory = $false)]
+    [string]$RunId = ''
 )
 
 Set-StrictMode -Version Latest
@@ -188,6 +194,25 @@ function Write-ReportLog {
     Write-Information $line -InformationAction Continue
 }
 
+function Get-RunIdField {
+    # Emits "RunId=<id>|" for tagged runs (GUI), or '' when -RunId is empty (NoGui),
+    # so the field order is otherwise unchanged and the NoGui '-like' matches still work.
+    if ([string]::IsNullOrEmpty($RunId)) { return '' }
+    return "RunId=$RunId|"
+}
+
+function Write-ConversionStage {
+    # Machine-readable report-stage marker for the GUI progress bar. Stage names and
+    # numeric Extra fields are literals, so no untrusted text is interpolated here.
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [AllowNull()][string]$Extra
+    )
+    $line = "CONVERSION_STAGE|$(Get-RunIdField)Stage=$Stage"
+    if (-not [string]::IsNullOrEmpty($Extra)) { $line += "|$Extra" }
+    Write-Output $line
+}
+
 function Write-ConversionProgress {
     param([Parameter(Mandatory = $true)] [string]$FolderPath)
 
@@ -195,7 +220,7 @@ function Write-ConversionProgress {
     $elapsedSeconds = [Math]::Max(1, [int][Math]::Round($elapsed.TotalSeconds))
     $ratePerMinute = [Math]::Round(($script:Stats.ItemsExported / $elapsedSeconds) * 60, 1)
     $safeFolderPath = (([string]$FolderPath) -replace "[\r\n]+", ' ').Replace('\', '/').Replace('|', '/')
-    Write-Output ("CONVERSION_PROGRESS|ItemsAttempted={0}|ItemsExported={1}|FoldersScanned={2}|ItemReadFailures={3}|ElapsedSeconds={4}|RatePerMinute={5}|FolderPath={6}" -f $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.FoldersScanned, $script:Stats.ItemReadFailures, $elapsedSeconds, $ratePerMinute, $safeFolderPath)
+    Write-Output ("CONVERSION_PROGRESS|{0}ItemsAttempted={1}|ItemsExported={2}|FoldersScanned={3}|ItemReadFailures={4}|ElapsedSeconds={5}|RatePerMinute={6}|FolderPath={7}" -f (Get-RunIdField), $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.FoldersScanned, $script:Stats.ItemReadFailures, $elapsedSeconds, $ratePerMinute, $safeFolderPath)
 }
 
 function ConvertTo-HtmlEncodedText {
@@ -1134,6 +1159,7 @@ function Write-HtmlReport {
     )
 
     Write-ReportLog 'Preparing HTML report data.'
+    Write-ConversionStage -Stage 'PreparingReport'
     $sorted = @($Records | Sort-Object @{ Expression = { if ($_.SortTime) { ([datetime]$_.SortTime).Ticks } else { 0 } } }, ParticipantsKey, Subject, FolderPath)
 
     $participantSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1162,6 +1188,7 @@ function Write-HtmlReport {
 
     $groupCount = [Math]::Max(1, $groups.Count)
     Write-ReportLog "Writing HTML report: 0 of $groupCount conversations."
+    Write-ConversionStage -Stage 'WritingReport' -Extra ("Written=0|Total={0}" -f $groupCount)
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
@@ -1175,9 +1202,11 @@ function Write-HtmlReport {
             $writtenGroups++
             if (($writtenGroups -eq $groupCount) -or ($writtenGroups % 50 -eq 0)) {
                 Write-ReportLog "HTML report progress: $writtenGroups of $groupCount conversations."
+                Write-ConversionStage -Stage 'WritingReport' -Extra ("Written={0}|Total={1}" -f $writtenGroups, $groupCount)
             }
         }
         Write-ReportLog 'Finalizing HTML report.'
+        Write-ConversionStage -Stage 'Finalizing'
         Write-ReportFooter -Writer $writer
     }
     finally {
@@ -1267,9 +1296,11 @@ function Invoke-ReportConversion {
         }
 
         Write-ReportLog "Finished reading PST. Message-like items collected: $($records.Count)"
+        Write-ConversionStage -Stage 'FinishedReading'
         Write-HtmlReport -Records $records.ToArray() -PstItem $pstItem -ReportPath $script:OutputPath
         Write-ReportLog "HTML report written to $script:OutputPath"
-        Write-Output ("CONVERSION_RESULT|OutputPath={0}|LogPath={1}|ItemsExported={2}|ItemReadFailures={3}|AttachmentReadFailures={4}" -f $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures)
+        Write-ConversionStage -Stage 'ReportWritten'
+        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures)
     }
     catch {
         Write-ReportLog "Fatal error: $($_.Exception.Message)" 'ERROR'
@@ -1280,6 +1311,7 @@ function Invoke-ReportConversion {
             try {
                 if ($null -ne $root) {
                     Write-ReportLog 'Detaching PST from Outlook profile.'
+                    Write-ConversionStage -Stage 'Detaching'
                     Invoke-OutlookComOperation -Operation 'detaching the PST from Outlook' -ScriptBlock { $namespace.RemoveStore($root) }
                 }
             }
