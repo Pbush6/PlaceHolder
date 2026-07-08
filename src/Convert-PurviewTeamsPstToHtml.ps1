@@ -180,7 +180,10 @@ function Write-ReportLog {
         [ValidateSet('INFO','WARN','ERROR')] [string]$Level = 'INFO'
     )
 
-    $line = '{0} [{1}] {2}' -f (Get-Date -Format 's'), $Level, $Message
+    # Collapse CR/LF so a message (e.g. a folder name) with an embedded newline cannot forge
+    # extra log lines or break the single-line stdout parser downstream.
+    $safeMessage = ([string]$Message) -replace "[\r\n]+", ' '
+    $line = '{0} [{1}] {2}' -f (Get-Date -Format 's'), $Level, $safeMessage
     if ($null -ne $script:LogWriter) { $script:LogWriter.WriteLine($line) }
     Write-Information $line -InformationAction Continue
 }
@@ -191,7 +194,7 @@ function Write-ConversionProgress {
     $elapsed = (Get-Date) - $script:Stats.StartedAt
     $elapsedSeconds = [Math]::Max(1, [int][Math]::Round($elapsed.TotalSeconds))
     $ratePerMinute = [Math]::Round(($script:Stats.ItemsExported / $elapsedSeconds) * 60, 1)
-    $safeFolderPath = ([string]$FolderPath).Replace('\', '/').Replace('|', '/')
+    $safeFolderPath = (([string]$FolderPath) -replace "[\r\n]+", ' ').Replace('\', '/').Replace('|', '/')
     Write-Output ("CONVERSION_PROGRESS|ItemsAttempted={0}|ItemsExported={1}|FoldersScanned={2}|ItemReadFailures={3}|ElapsedSeconds={4}|RatePerMinute={5}|FolderPath={6}" -f $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.FoldersScanned, $script:Stats.ItemReadFailures, $elapsedSeconds, $ratePerMinute, $safeFolderPath)
 }
 
