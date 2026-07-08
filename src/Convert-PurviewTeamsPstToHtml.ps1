@@ -1063,6 +1063,9 @@ function Write-ConversationHtml {
         $otherPeopleLabel = if ($displayOtherPeople.Count -gt 0) { 'with ' + $otherPeoplePreview } else { 'no other named participants shown' }
         $speakerContext = "Chat: $conversationTitle • $otherPeopleLabel"
         $bodyHtml = ConvertTo-HtmlBody $record.BodyText
+        # Blank the 4501 "no date" sentinel in the detail rows too, matching the header timestamp.
+        $sentDisplay = if (Test-MissingDate $record.SentOn) { '' } else { $record.SentOn }
+        $receivedDisplay = if (Test-MissingDate $record.ReceivedTime) { '' } else { $record.ReceivedTime }
         $details = @"
 <details class='message-details'>
   <summary>Details</summary>
@@ -1072,8 +1075,8 @@ function Write-ConversationHtml {
   <div><strong>From:</strong> $(ConvertTo-HtmlEncodedText $record.SenderName) &lt;$(ConvertTo-HtmlEncodedText $record.SenderEmail)&gt;</div>
   <div><strong>To:</strong> $(ConvertTo-HtmlEncodedText $record.To)</div>
   <div><strong>Cc:</strong> $(ConvertTo-HtmlEncodedText $record.Cc)</div>
-  <div><strong>Sent:</strong> $(ConvertTo-HtmlEncodedText $record.SentOn)</div>
-  <div><strong>Received:</strong> $(ConvertTo-HtmlEncodedText $record.ReceivedTime)</div>
+  <div><strong>Sent:</strong> $(ConvertTo-HtmlEncodedText $sentDisplay)</div>
+  <div><strong>Received:</strong> $(ConvertTo-HtmlEncodedText $receivedDisplay)</div>
   <div><strong>Entry ID:</strong> <span class='wrap'>$(ConvertTo-HtmlEncodedText $record.EntryId)</span></div>
 </details>
 "@
