@@ -225,7 +225,10 @@ function Start-NoGuiMode {
         Assert-OutlookAvailableForRealRun -UseSampleData:$UseSampleData
         $result = Invoke-EmbeddedConversion -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData
         if ($result.StdOut) { Write-Output $result.StdOut.TrimEnd() }
-        if ($result.StdErr) { Write-Error $result.StdErr.TrimEnd() }
+        # Surface child stderr without raising a terminating error, so stderr noise on a
+        # successful (exit 0) run isn't turned into a failure. Success is decided strictly
+        # by the child's ExitCode below.
+        if ($result.StdErr) { [Console]::Error.WriteLine($result.StdErr.TrimEnd()) }
         if ($result.ExitCode -ne 0) { [Environment]::Exit([int]$result.ExitCode) }
     }
     catch {
