@@ -43,7 +43,8 @@ function ConvertTo-ArgumentList {
         [string]$LogPath,
         [string[]]$DefaultConversationParticipants,
         [switch]$KeepPstAttached,
-        [switch]$UseSampleData
+        [switch]$UseSampleData,
+        [string]$RunId
     )
 
     $args = [System.Collections.Generic.List[string]]::new()
@@ -61,6 +62,7 @@ function ConvertTo-ArgumentList {
     if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $args.Add('-OutputPath'); $args.Add($OutputPath) }
     if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $args.Add('-LogPath'); $args.Add($LogPath) }
     if ($KeepPstAttached) { $args.Add('-KeepPstAttached') }
+    if (-not [string]::IsNullOrWhiteSpace($RunId)) { $args.Add('-RunId'); $args.Add($RunId) }
     foreach ($participant in @($DefaultConversationParticipants)) {
         if (-not [string]::IsNullOrWhiteSpace($participant)) {
             $args.Add('-DefaultConversationParticipants')
@@ -167,7 +169,8 @@ function Start-EmbeddedConversionProcess {
         [string]$LogPath,
         [string[]]$DefaultConversationParticipants = @(),
         [switch]$KeepPstAttached,
-        [switch]$UseSampleData
+        [switch]$UseSampleData,
+        [string]$RunId
     )
 
     $corePath = New-EmbeddedCoreScript
@@ -176,17 +179,35 @@ function Start-EmbeddedConversionProcess {
 
         $psi = [System.Diagnostics.ProcessStartInfo]::new()
         $psi.FileName = $pwsh
-        $childArgs = ConvertTo-ArgumentList -CorePath $corePath -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData
+        $childArgs = ConvertTo-ArgumentList -CorePath $corePath -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData -RunId $RunId
         $psi.Arguments = ConvertTo-NativeArgumentString -Argument $childArgs
         $psi.UseShellExecute = $false
-        $psi.RedirectStandardOutput = $false
+        # Redirect stdout so the run-ID-tagged progress/stage lines can drive the GUI.
+        # Stderr stays un-redirected; fatal-error detail is still read from the log file.
+        $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $false
         $psi.CreateNoWindow = $true
 
+        # Thread-safe hand-off: the OutputDataReceived handler runs on a non-UI thread and
+        # MUST NOT touch WinForms controls; it only enqueues raw stdout lines. The WinForms
+        # timer drains this queue on the UI thread. Verified in PS 5.1 that a
+        # Register-ObjectEvent -Action enqueue fires during a modal ShowDialog loop, whereas a
+        # raw add_OutputDataReceived scriptblock delegate crashes the process.
+        $queue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $psi
+        $subscription = Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -MessageData $queue -Action {
+            if ($null -ne $EventArgs.Data) { $Event.MessageData.Enqueue($EventArgs.Data) }
+        }
+        [void]$proc.Start()
+        $proc.BeginOutputReadLine()
+
         [pscustomobject]@{
-            Process = [System.Diagnostics.Process]::Start($psi)
+            Process = $proc
             CorePath = $corePath
             TempDir = Split-Path -Path $corePath -Parent
+            OutputQueue = $queue
+            OutputSubscription = $subscription
         }
     }
     catch {
@@ -198,6 +219,82 @@ function Start-EmbeddedConversionProcess {
     }
 }
 
+
+function ConvertFrom-ProgressStdoutLine {
+    # Pure, side-effect-free mapper from a core stdout line to a GUI progress step.
+    # Returns $null for anything that is NOT an applicable current-run progress/stage line:
+    #   - not a CONVERSION_PROGRESS / CONVERSION_STAGE machine line
+    #   - a line whose RunId != ExpectedRunId (foreign run)
+    #   - a line with no RunId while an ExpectedRunId is set (stale/pre-RunId line)
+    #   - a malformed line (never throws)
+    # Otherwise returns [pscustomobject]@{ Percent = <int>; Status = <string> }.
+    # Percent bands mirror the timer's historical mapping: collected 15-58,
+    # FinishedReading 60, PreparingReport 62, WritingReport 66 (start) / 68-91 (progress),
+    # Finalizing 92, Detaching 94, ReportWritten 96.
+    param(
+        [AllowNull()][string]$Line,
+        [AllowNull()][string]$ExpectedRunId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Line)) { return $null }
+    if ($Line -notmatch '^CONVERSION_(PROGRESS|STAGE)\|') { return $null }
+
+    $fields = @{}
+    foreach ($part in ($Line -split '\|')) {
+        $idx = $part.IndexOf('=')
+        if ($idx -gt 0) { $fields[$part.Substring(0, $idx)] = $part.Substring($idx + 1) }
+    }
+
+    # RunId gating: only current-run lines are applicable. A missing RunId yields ''
+    # which will not equal a non-empty ExpectedRunId, so stale/foreign lines are ignored.
+    $lineRunId = if ($fields.ContainsKey('RunId')) { [string]$fields['RunId'] } else { '' }
+    if ($lineRunId -ne [string]$ExpectedRunId) { return $null }
+
+    if ($Line -match '^CONVERSION_PROGRESS\|') {
+        $collected = 0
+        if ($fields.ContainsKey('ItemsExported')) { [void][int]::TryParse([string]$fields['ItemsExported'], [ref]$collected) }
+        $percent = [Math]::Min(58, 15 + [int][Math]::Ceiling($collected / 400))
+        $status = "Reading PST... collected $collected"
+        if ($fields.ContainsKey('FolderPath') -and -not [string]::IsNullOrWhiteSpace([string]$fields['FolderPath'])) {
+            $status += "; folder: $([string]$fields['FolderPath'])"
+        }
+        return [pscustomobject]@{ Percent = $percent; Status = $status }
+    }
+
+    # CONVERSION_STAGE
+    $stage = if ($fields.ContainsKey('Stage')) { [string]$fields['Stage'] } else { '' }
+    switch ($stage) {
+        'FinishedReading' { return [pscustomobject]@{ Percent = 60; Status = 'Finished reading PST. Preparing report...' } }
+        'PreparingReport' { return [pscustomobject]@{ Percent = 62; Status = 'Preparing HTML report...' } }
+        'WritingReport' {
+            $written = 0; $total = 0
+            if ($fields.ContainsKey('Written')) { [void][int]::TryParse([string]$fields['Written'], [ref]$written) }
+            if ($fields.ContainsKey('Total')) { [void][int]::TryParse([string]$fields['Total'], [ref]$total) }
+            if ($written -le 0) {
+                return [pscustomobject]@{ Percent = 66; Status = 'Writing HTML report...' }
+            }
+            $total = [Math]::Max(1, $total)
+            $percent = [Math]::Min(91, 68 + [int][Math]::Floor(($written / $total) * 23))
+            return [pscustomobject]@{ Percent = $percent; Status = "Writing HTML report... $written of $total conversations" }
+        }
+        'Finalizing'   { return [pscustomobject]@{ Percent = 92; Status = 'Finalizing HTML report...' } }
+        'Detaching'    { return [pscustomobject]@{ Percent = 94; Status = 'Detaching PST and cleaning up...' } }
+        'ReportWritten' { return [pscustomobject]@{ Percent = 96; Status = 'Cleaning up...' } }
+        default { return $null }
+    }
+}
+
+function Stop-ConversionOutputReader {
+    # Tears down the async stdout reader and its event subscription so no handler leaks
+    # after a conversion completes or the window closes. Safe to call more than once.
+    param([AllowNull()][object]$Conversion)
+    if ($null -eq $Conversion) { return }
+    try { if ($Conversion.Process) { $Conversion.Process.CancelOutputRead() } } catch { }
+    if ($Conversion.PSObject.Properties.Name -contains 'OutputSubscription' -and $Conversion.OutputSubscription) {
+        try { Unregister-Event -SourceIdentifier $Conversion.OutputSubscription.Name -ErrorAction SilentlyContinue } catch { }
+        try { Remove-Job -Id $Conversion.OutputSubscription.Id -Force -ErrorAction SilentlyContinue } catch { }
+    }
+}
 
 function ConvertFrom-ResultLine {
     param([AllowNull()][string]$ResultLine)
@@ -479,6 +576,9 @@ function Start-GuiMode {
     $script:conversionStartedAt = $null
     $script:lastCollectedCount = 0
     $script:lastProgressValue = 0
+    $script:activeRunId = $null
+    $script:sawStdoutProgress = $false
+    $script:lastStatusBase = 'Reading PST...'
 
     $progressTimer = [System.Windows.Forms.Timer]::new()
     $progressTimer.Interval = 1000
@@ -489,73 +589,33 @@ function Start-GuiMode {
         $elapsedSeconds = [Math]::Max(1, [int]((Get-Date) - $script:conversionStartedAt).TotalSeconds)
         $elapsedText = [TimeSpan]::FromSeconds($elapsedSeconds).ToString('hh\:mm\:ss')
 
-        if (Test-Path -LiteralPath $logBox.Text) {
-            try {
-                $recentLog = Get-Content -LiteralPath $logBox.Text -Tail 80 -ErrorAction Stop
-                $folderLine = @($recentLog | Where-Object { $_ -match 'Scanning folder: (.+)$' } | Select-Object -Last 1)
-                $folderText = if ($folderLine -and $folderLine[0] -match 'Scanning folder: (.+)$') { $Matches[1] } else { '' }
-                $reportProgressLine = @($recentLog | Where-Object { $_ -match 'HTML report progress: (\d+) of (\d+) conversations\.' } | Select-Object -Last 1)
-                $writingReportLine = @($recentLog | Where-Object { $_ -match 'Writing HTML report: 0 of (\d+) conversations\.' } | Select-Object -Last 1)
-                $finalizingReportLine = @($recentLog | Where-Object { $_ -match 'Finalizing HTML report\.' } | Select-Object -Last 1)
-                $htmlWrittenLine = @($recentLog | Where-Object { $_ -match 'HTML report written to ' } | Select-Object -Last 1)
-                $detachLine = @($recentLog | Where-Object { $_ -match 'Detaching PST from Outlook profile\.' } | Select-Object -Last 1)
-                $preparingReportLine = @($recentLog | Where-Object { $_ -match 'Preparing HTML report data\.' } | Select-Object -Last 1)
-                $finishedReadingLine = @($recentLog | Where-Object { $_ -match 'Finished reading PST\. Message-like items collected:' } | Select-Object -Last 1)
-                $collectedLine = @($recentLog | Where-Object { $_ -match 'Collected (\d+) message-like items so far\.' } | Select-Object -Last 1)
-                if ($collectedLine -and $collectedLine[0] -match 'Collected (\d+) message-like items so far\.') {
-                    $script:lastCollectedCount = [int]$Matches[1]
-                }
-
-                if ($htmlWrittenLine) {
-                    Set-ConversionProgress 96 ("Cleaning up... elapsed {0}" -f $elapsedText)
-                }
-                elseif ($detachLine) {
-                    Set-ConversionProgress 94 ("Detaching PST and cleaning up... elapsed {0}" -f $elapsedText)
-                }
-                elseif ($finalizingReportLine) {
-                    Set-ConversionProgress 92 ("Finalizing HTML report... elapsed {0}" -f $elapsedText)
-                }
-                elseif ($reportProgressLine -and $reportProgressLine[0] -match 'HTML report progress: (\d+) of (\d+) conversations\.') {
-                    $written = [int]$Matches[1]
-                    $total = [Math]::Max(1, [int]$Matches[2])
-                    $progressValue = [Math]::Min(91, 68 + [int][Math]::Floor(($written / $total) * 23))
-                    Set-ConversionProgress $progressValue ("Writing HTML report... {0} of {1} conversations; elapsed {2}" -f $written, $total, $elapsedText)
-                }
-                elseif ($writingReportLine) {
-                    Set-ConversionProgress 66 ("Writing HTML report... elapsed {0}" -f $elapsedText)
-                }
-                elseif ($preparingReportLine) {
-                    Set-ConversionProgress 62 ("Preparing HTML report... elapsed {0}" -f $elapsedText)
-                }
-                elseif ($finishedReadingLine) {
-                    Set-ConversionProgress 60 ("Finished reading PST. Preparing report... elapsed {0}" -f $elapsedText)
-                }
-                elseif ($script:lastCollectedCount -gt 0) {
-                    $rate = [Math]::Round(($script:lastCollectedCount / $elapsedSeconds) * 60, 1)
-                    $progressValue = [Math]::Min(58, 15 + [int][Math]::Ceiling($script:lastCollectedCount / 400))
-                    if ([string]::IsNullOrWhiteSpace($folderText)) {
-                        Set-ConversionProgress $progressValue ("Reading PST... collected {0}; elapsed {1}; rate {2}/min" -f $script:lastCollectedCount, $elapsedText, $rate)
-                    }
-                    else {
-                        Set-ConversionProgress $progressValue ("Reading PST... collected {0}; elapsed {1}; rate {2}/min; folder: {3}" -f $script:lastCollectedCount, $elapsedText, $rate, $folderText)
-                    }
-                }
-                else {
-                    $pulse = [Math]::Min(30, 10 + [int][Math]::Floor($elapsedSeconds / 30))
-                    if ([string]::IsNullOrWhiteSpace($folderText)) {
-                        Set-ConversionProgress $pulse ("Reading PST... elapsed {0}" -f $elapsedText)
-                    }
-                    else {
-                        Set-ConversionProgress $pulse ("Reading PST... elapsed {0}; folder: {1}" -f $elapsedText, $folderText)
-                    }
-                }
-            }
-            catch {
-                Set-ConversionProgress ([Math]::Min(30, 10 + [int][Math]::Floor($elapsedSeconds / 30))) ("Reading PST... elapsed {0}" -f $elapsedText)
+        # Progress is driven entirely by the run-ID-tagged stdout the core emits. Draining the
+        # thread-safe queue here (on the UI thread) and gating each line by $script:activeRunId
+        # makes the bar structurally immune to stale logs and core prose changes. The log file is
+        # no longer parsed for progress - only for fatal-error detail on a nonzero exit below.
+        $latest = $null
+        $queue = $script:activeConversion.OutputQueue
+        if ($queue) {
+            $item = $null
+            while ($queue.TryDequeue([ref]$item)) {
+                $parsed = ConvertFrom-ProgressStdoutLine -Line $item -ExpectedRunId $script:activeRunId
+                if ($null -ne $parsed) { $latest = $parsed }
             }
         }
+
+        if ($null -ne $latest) {
+            $script:sawStdoutProgress = $true
+            $script:lastStatusBase = $latest.Status
+            Set-ConversionProgress $latest.Percent ("{0}; elapsed {1}" -f $latest.Status, $elapsedText)
+        }
+        elseif ($script:sawStdoutProgress) {
+            # No new applicable line this tick: hold the bar, just refresh the elapsed time.
+            Set-ConversionProgress $script:lastProgressValue ("{0}; elapsed {1}" -f $script:lastStatusBase, $elapsedText)
+        }
         else {
-            Set-ConversionProgress ([Math]::Min(30, 10 + [int][Math]::Floor($elapsedSeconds / 30))) ("Reading PST... elapsed {0}" -f $elapsedText)
+            # No run-ID-verified stdout has arrived yet: time-based fallback pulse (10-30).
+            $pulse = [Math]::Min(30, 10 + [int][Math]::Floor($elapsedSeconds / 30))
+            Set-ConversionProgress $pulse ("Reading PST... elapsed {0}" -f $elapsedText)
         }
 
         if ($proc.HasExited) {
@@ -599,10 +659,12 @@ function Start-GuiMode {
                 [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Conversion failed', 'OK', 'Error') | Out-Null
             }
             finally {
+                Stop-ConversionOutputReader -Conversion $script:activeConversion
                 if ($script:activeConversion.TempDir -and (Test-Path -LiteralPath $script:activeConversion.TempDir)) {
                     Remove-Item -LiteralPath $script:activeConversion.TempDir -Recurse -Force -ErrorAction SilentlyContinue
                 }
                 $script:activeConversion = $null
+                $script:activeRunId = $null
                 Set-ConversionControlsEnabled $true
             }
         }
@@ -621,16 +683,20 @@ function Start-GuiMode {
             if ($proc -and -not $proc.HasExited) { $proc.Kill() }
         }
         catch { }
+        Stop-ConversionOutputReader -Conversion $script:activeConversion
         if ($script:activeConversion.TempDir -and (Test-Path -LiteralPath $script:activeConversion.TempDir)) {
             Remove-Item -LiteralPath $script:activeConversion.TempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
         $script:activeConversion = $null
+        $script:activeRunId = $null
     })
 
     $convertButton.Add_Click({
         try {
             $logText.Clear()
             $script:lastCollectedCount = 0
+            $script:sawStdoutProgress = $false
+            $script:lastStatusBase = 'Reading PST...'
             Reset-ConversionProgress 'Ready'
             & $appendLog 'Starting conversion...'
             Set-ConversionProgress 5 'Starting conversion...'
@@ -652,7 +718,8 @@ function Start-GuiMode {
 
             Set-ConversionProgress 12 'Starting PST read...'
             $script:conversionStartedAt = Get-Date
-            $script:activeConversion = Start-EmbeddedConversionProcess -PstPath $pstBox.Text -OutputPath $outputBox.Text -LogPath $logBox.Text -DefaultConversationParticipants @() -KeepPstAttached:($keepCheck.Checked) -UseSampleData:$false
+            $script:activeRunId = [guid]::NewGuid().ToString('N')
+            $script:activeConversion = Start-EmbeddedConversionProcess -PstPath $pstBox.Text -OutputPath $outputBox.Text -LogPath $logBox.Text -DefaultConversationParticipants @() -KeepPstAttached:($keepCheck.Checked) -UseSampleData:$false -RunId $script:activeRunId
             $progressTimer.Start()
         }
         catch {
@@ -662,10 +729,12 @@ function Start-GuiMode {
             $progressLabel.Text = 'Conversion failed.'
             & $appendLog ('FAILED: ' + $_.Exception.Message)
             [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Conversion failed', 'OK', 'Error') | Out-Null
+            Stop-ConversionOutputReader -Conversion $script:activeConversion
             if ($script:activeConversion -and $script:activeConversion.TempDir -and (Test-Path -LiteralPath $script:activeConversion.TempDir)) {
                 Remove-Item -LiteralPath $script:activeConversion.TempDir -Recurse -Force -ErrorAction SilentlyContinue
             }
             $script:activeConversion = $null
+            $script:activeRunId = $null
             Set-ConversionControlsEnabled $true
         }
     })
