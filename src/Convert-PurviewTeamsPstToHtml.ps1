@@ -415,6 +415,16 @@ function Get-AttachmentSummaryHtml {
     }
 }
 
+function Test-MissingDate {
+    # Outlook/MAPI returns 1/1/4501 (year 4501) as a "no date" sentinel rather than $null, which
+    # would otherwise sort items to the far future and display an absurd timestamp. Treat empty,
+    # null, and any date in year >= 4500 as missing.
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $true }
+    if ($Value -is [datetime] -and $Value.Year -ge 4500) { return $true }
+    return $false
+}
+
 function Get-MessageRecord {
     param(
         [Parameter(Mandatory = $true)] [object]$Item,
@@ -433,8 +443,9 @@ function Get-MessageRecord {
     $entryId = Get-PropSafe -Object $Item -Name 'EntryID' -Default ''
     $body = Get-PropSafe -Object $Item -Name 'Body' -Default ''
     $sortTime = $receivedTime
-    if ($null -eq $sortTime -or [string]::IsNullOrWhiteSpace([string]$sortTime)) { $sortTime = $sentOn }
-    if ($null -eq $sortTime -or [string]::IsNullOrWhiteSpace([string]$sortTime)) { $sortTime = $creationTime }
+    if (Test-MissingDate $sortTime) { $sortTime = $sentOn }
+    if (Test-MissingDate $sortTime) { $sortTime = $creationTime }
+    if (Test-MissingDate $sortTime) { $sortTime = $null }
 
     $senderDisplay = ConvertTo-NormalizedPersonName $senderName
     if ([string]::IsNullOrWhiteSpace($senderDisplay)) { $senderDisplay = ConvertTo-NormalizedPersonName $senderEmail }
