@@ -100,7 +100,7 @@ function Resolve-OutputFilePath {
         return (Join-Path $DefaultDirectory $DefaultFileName)
     }
 
-    $parent = Split-Path -Path $clean -Parent
+    $parent = Split-Path -LiteralPath $clean
     if ([string]::IsNullOrWhiteSpace($parent)) {
         return (Join-Path $DefaultDirectory $clean)
     }
@@ -130,7 +130,7 @@ function Assert-OutputPathsSafe {
         if (Test-Path -LiteralPath $pathToCheck -PathType Container) {
             throw "Output path points to a folder, not a file: $pathToCheck"
         }
-        $parent = Split-Path -Path $pathToCheck -Parent
+        $parent = Split-Path -LiteralPath $pathToCheck
         if ([string]::IsNullOrWhiteSpace($parent)) { throw "Output path must include a parent folder: $pathToCheck" }
         if (Test-Path -LiteralPath $parent -PathType Leaf) {
             throw "Output parent path is a file, not a folder: $parent"
@@ -1215,9 +1215,11 @@ function Invoke-ReportConversion {
     Assert-OutputPathsSafe -ReportPath $script:OutputPath -LogPath $script:LogPath
 
     foreach ($pathToPrepare in @($script:OutputPath, $script:LogPath)) {
-        $outDir = Split-Path -Path $pathToPrepare -Parent
+        $outDir = Split-Path -LiteralPath $pathToPrepare
         if ([string]::IsNullOrWhiteSpace($outDir)) { $outDir = $downloads }
-        if (-not (Test-Path -LiteralPath $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
+        # New-Item has no -LiteralPath, and -Path treats [ ] as wildcards; use the .NET API so a
+        # bracketed output directory is created literally. CreateDirectory is a no-op if it exists.
+        if (-not (Test-Path -LiteralPath $outDir)) { [System.IO.Directory]::CreateDirectory($outDir) | Out-Null }
     }
 
     # Start each conversion with a fresh log so the GUI never reads stale final-stage lines
