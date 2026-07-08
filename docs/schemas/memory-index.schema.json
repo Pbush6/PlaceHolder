@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curt-memory-index",
+  "title": "Curt memory index registry",
+  "type": "object",
+  "required": ["version", "lastUpdated", "entries"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "lastUpdated": { "type": "string", "format": "date" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "path", "tags", "summary", "created", "updated"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "type": {
+            "type": "string",
+            "enum": ["profile", "preference", "learning", "research", "decision", "insight", "session"]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "summary": { "type": "string", "minLength": 1 },
+          "created": { "type": "string", "format": "date" },
+          "updated": { "type": "string", "format": "date" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

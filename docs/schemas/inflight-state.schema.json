@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curt-inflight-state",
+  "title": "Curt inflight task state",
+  "type": "object",
+  "required": ["version", "lastUpdated", "tasks"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "lastUpdated": { "type": "string", "format": "date" },
+    "project": { "type": "string" },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status", "priority"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]
+          },
+          "priority": { "type": "integer", "minimum": 1 },
+          "notes": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

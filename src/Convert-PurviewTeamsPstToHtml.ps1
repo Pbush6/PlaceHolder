@@ -59,13 +59,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:Stats = [ordered]@{
-    StartedAt              = Get-Date
-    FoldersScanned         = 0
-    ItemsAttempted         = 0
-    ItemsExported          = 0
-    ItemsSkipped           = 0
-    ItemReadFailures       = 0
-    AttachmentReadFailures = 0
+    StartedAt               = Get-Date
+    FoldersScanned          = 0
+    ItemsAttempted          = 0
+    ItemsExported           = 0
+    ItemsSkipped            = 0
+    ItemReadFailures        = 0
+    AttachmentReadFailures  = 0
+    SubfolderScanFailures   = 0
 }
 
 # Single no-BOM, auto-flushing writer over the log file. Opened in Invoke-ReportConversion
@@ -221,6 +222,16 @@ function Write-ConversionProgress {
     $ratePerMinute = [Math]::Round(($script:Stats.ItemsExported / $elapsedSeconds) * 60, 1)
     $safeFolderPath = (([string]$FolderPath) -replace "[\r\n]+", ' ').Replace('\', '/').Replace('|', '/')
     Write-Output ("CONVERSION_PROGRESS|{0}ItemsAttempted={1}|ItemsExported={2}|FoldersScanned={3}|ItemReadFailures={4}|ElapsedSeconds={5}|RatePerMinute={6}|FolderPath={7}" -f (Get-RunIdField), $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.FoldersScanned, $script:Stats.ItemReadFailures, $elapsedSeconds, $ratePerMinute, $safeFolderPath)
+}
+
+function Write-ConversionError {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [AllowNull()][string]$ExitCode = '1'
+    )
+    $safeMessage = (([string]$Message) -replace "[\r\n]+", ' ').Replace('|', '/')
+    if ($safeMessage.Length -gt 500) { $safeMessage = $safeMessage.Substring(0, 500) }
+    Write-Output ("CONVERSION_ERROR|{0}ExitCode={1}|Message={2}" -f (Get-RunIdField), $ExitCode, $safeMessage)
 }
 
 function ConvertTo-HtmlEncodedText {
@@ -422,6 +433,7 @@ function Get-AttachmentSummaryHtml {
             }
             catch {
                 $script:Stats.AttachmentReadFailures++
+                Write-ReportLog "Could not read attachment $i on item. $($_.Exception.Message)" 'WARN'
             }
             finally { Close-ComObjectSafe $att }
         }
@@ -568,6 +580,7 @@ function Read-OutlookFolder {
                 Read-OutlookFolder -Folder $child -FolderPath "$FolderPath\$childName" -Records $Records
             }
             catch {
+                $script:Stats.SubfolderScanFailures++
                 Write-ReportLog "Could not scan child folder under $FolderPath. $($_.Exception.Message)" 'WARN'
             }
             finally {
@@ -1358,10 +1371,12 @@ function Invoke-ReportConversion {
         Write-HtmlReport -Records $records.ToArray() -PstItem $pstItem -ReportPath $script:OutputPath
         Write-ReportLog "HTML report written to $script:OutputPath"
         Write-ConversionStage -Stage 'ReportWritten'
-        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures)
+        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures)
     }
     catch {
-        Write-ReportLog "Fatal error: $($_.Exception.Message)" 'ERROR'
+        $fatalMessage = if ($_.Exception.Message) { $_.Exception.Message } else { [string]$_.Exception }
+        Write-ReportLog "Fatal error: $fatalMessage" 'ERROR'
+        try { Write-ConversionError -Message $fatalMessage } catch { }
         throw
     }
     finally {
@@ -1380,7 +1395,7 @@ function Invoke-ReportConversion {
         }
 
         $elapsed = (Get-Date) - $script:Stats.StartedAt
-        Write-ReportLog ('Summary: folders={0}; attempted={1}; exported={2}; skipped={3}; itemReadFailures={4}; attachmentReadFailures={5}; elapsed={6}' -f $script:Stats.FoldersScanned, $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.ItemsSkipped, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $elapsed)
+        Write-ReportLog ('Summary: folders={0}; attempted={1}; exported={2}; skipped={3}; itemReadFailures={4}; attachmentReadFailures={5}; subfolderScanFailures={6}; elapsed={7}' -f $script:Stats.FoldersScanned, $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.ItemsSkipped, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $elapsed)
 
         Close-ComObjectSafe $root
         Close-ComObjectSafe $namespace

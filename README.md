@@ -36,6 +36,28 @@ PurviewTeamsPstToHtmlApp/
   scripts/                              # Verification helpers
 ```
 
+## Verification suite
+
+Install a modern Pester locally if needed:
+
+```powershell
+Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck
+```
+
+Run the canonical suite from the repo root:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Run-VerificationSuite.ps1
+```
+
+The suite covers:
+- parser checks for launcher, core, and regression script
+- embedded-core consistency between launcher and core source
+- core sample-data smoke path
+- launcher sample-data smoke path
+- permanent stop-process-tree regression script
+- build smoke for debug/release EXEs
+
 ## Build
 
 From this folder:

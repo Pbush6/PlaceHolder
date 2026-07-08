@@ -1,3 +1,5 @@
 build/
 *.exe
 .superpowers/
+test-output/*.html
+test-output/*.log

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "purview-stdout-contract",
+  "title": "Purview PST Converter stdout contract",
+  "description": "Pipe-delimited machine lines emitted by Convert-PurviewTeamsPstToHtml.ps1 on stdout.",
+  "oneOf": [
+    { "$ref": "#/$defs/progressLine" },
+    { "$ref": "#/$defs/stageLine" },
+    { "$ref": "#/$defs/resultLine" },
+    { "$ref": "#/$defs/errorLine" }
+  ],
+  "$defs": {
+    "runIdField": {
+      "type": "object",
+      "properties": {
+        "RunId": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
+      },
+      "additionalProperties": true
+    },
+    "progressLine": {
+      "type": "object",
+      "required": ["prefix", "ItemsAttempted", "ItemsExported", "FoldersScanned", "ItemReadFailures", "ElapsedSeconds", "RatePerMinute", "FolderPath"],
+      "properties": {
+        "prefix": { "const": "CONVERSION_PROGRESS" },
+        "ItemsAttempted": { "type": "integer", "minimum": 0 },
+        "ItemsExported": { "type": "integer", "minimum": 0 },
+        "FoldersScanned": { "type": "integer", "minimum": 0 },
+        "ItemReadFailures": { "type": "integer", "minimum": 0 },
+        "ElapsedSeconds": { "type": "integer", "minimum": 1 },
+        "RatePerMinute": { "type": "number", "minimum": 0 },
+        "FolderPath": { "type": "string" }
+      }
+    },
+    "stageLine": {
+      "type": "object",
+      "required": ["prefix", "Stage"],
+      "properties": {
+        "prefix": { "const": "CONVERSION_STAGE" },
+        "Stage": {
+          "type": "string",
+          "enum": ["FinishedReading", "PreparingReport", "WritingReport", "Finalizing", "Detaching", "ReportWritten"]
+        },
+        "Written": { "type": "integer", "minimum": 0 },
+        "Total": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "resultLine": {
+      "type": "object",
+      "required": ["prefix", "OutputPath", "LogPath", "ItemsExported", "ItemReadFailures", "AttachmentReadFailures", "SubfolderScanFailures"],
+      "properties": {
+        "prefix": { "const": "CONVERSION_RESULT" },
+        "OutputPath": { "type": "string", "minLength": 1 },
+        "LogPath": { "type": "string", "minLength": 1 },
+        "ItemsExported": { "type": "integer", "minimum": 0 },
+        "ItemReadFailures": { "type": "integer", "minimum": 0 },
+        "AttachmentReadFailures": { "type": "integer", "minimum": 0 },
+        "SubfolderScanFailures": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "errorLine": {
+      "type": "object",
+      "required": ["prefix", "ExitCode", "Message"],
+      "properties": {
+        "prefix": { "const": "CONVERSION_ERROR" },
+        "ExitCode": { "type": "string", "pattern": "^[0-9]+$" },
+        "Message": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    }
+  }
+}
