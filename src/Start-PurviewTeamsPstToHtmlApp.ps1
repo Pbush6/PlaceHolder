@@ -174,6 +174,8 @@ function Start-EmbeddedConversionProcess {
     )
 
     $corePath = New-EmbeddedCoreScript
+    $proc = $null
+    $subscription = $null
     try {
         $pwsh = Resolve-PowerShell7Path
 
@@ -211,6 +213,13 @@ function Start-EmbeddedConversionProcess {
         }
     }
     catch {
+        # If Start()/BeginOutputReadLine() (or anything after the subscription) threw, the
+        # event subscription and process are already live - tear them down so repeated failed
+        # clicks can't accumulate orphaned subscribers.
+        if ($subscription) {
+            Stop-ConversionOutputReader -Conversion ([pscustomobject]@{ Process = $proc; OutputSubscription = $subscription })
+        }
+        if ($proc) { try { $proc.Dispose() } catch { } }
         if ($corePath -and (Test-Path -LiteralPath $corePath)) {
             $tempDir = Split-Path -Path $corePath -Parent
             Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -237,6 +246,9 @@ function ConvertFrom-ProgressStdoutLine {
     )
 
     if ([string]::IsNullOrWhiteSpace($Line)) { return $null }
+    # No active run id means nothing is applicable; also stops an untagged line from matching
+    # an empty expected id on control reuse.
+    if ([string]::IsNullOrEmpty($ExpectedRunId)) { return $null }
     if ($Line -notmatch '^CONVERSION_(PROGRESS|STAGE)\|') { return $null }
 
     $fields = @{}
@@ -574,7 +586,6 @@ function Start-GuiMode {
 
     $script:activeConversion = $null
     $script:conversionStartedAt = $null
-    $script:lastCollectedCount = 0
     $script:lastProgressValue = 0
     $script:activeRunId = $null
     $script:sawStdoutProgress = $false
@@ -694,7 +705,6 @@ function Start-GuiMode {
     $convertButton.Add_Click({
         try {
             $logText.Clear()
-            $script:lastCollectedCount = 0
             $script:sawStdoutProgress = $false
             $script:lastStatusBase = 'Reading PST...'
             Reset-ConversionProgress 'Ready'
