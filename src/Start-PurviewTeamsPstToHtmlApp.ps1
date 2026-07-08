@@ -927,6 +927,18 @@ function Start-GuiMode {
             Update-OutputPathsFromPstPath
             Assert-GuiOutputPathsValid
 
+            if (Test-Path -LiteralPath $outputBox.Text -PathType Leaf) {
+                $overwriteAnswer = [System.Windows.Forms.MessageBox]::Show($form, "The report file already exists and will be overwritten:`n$($outputBox.Text)`n`nContinue?", 'Overwrite existing report?', 'YesNo', 'Warning')
+                if ($overwriteAnswer -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    & $appendLog 'Canceled: existing report file not overwritten.'
+                    Reset-ConversionProgress 'Canceled.'
+                    Complete-ConversionTeardown
+                    Set-ConversionControlsEnabled $true
+                    $cancelButton.Enabled = $false
+                    return
+                }
+            }
+
             Set-ConversionProgress 10 'Checking required programs...'
             [void](Resolve-PowerShell7Path)
             Assert-OutlookAvailableForRealRun -UseSampleData:$false
