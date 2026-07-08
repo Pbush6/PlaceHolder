@@ -769,11 +769,13 @@ function Start-GuiMode {
         if ($outputFullPath -ieq $logFullPath) { throw 'Output HTML and Log file must be different files.' }
         if ([IO.Path]::GetExtension($outputFullPath) -notin @('.html','.htm')) { throw 'Output HTML must end in .html or .htm.' }
         if ([IO.Path]::GetExtension($logFullPath) -notin @('.log','.txt')) { throw 'Log file must end in .log or .txt.' }
-        foreach ($pathToCheck in @($outputFullPath, $logFullPath)) {
+        foreach ($check in @(@{ Label = 'Output'; Path = $outputFullPath }, @{ Label = 'Log'; Path = $logFullPath })) {
+            $pathToCheck = $check.Path
             if (Test-Path -LiteralPath $pathToCheck -PathType Container) { throw "Path points to a folder, not a file: $pathToCheck" }
             $parent = Split-Path -Path $pathToCheck -Parent
             if ([string]::IsNullOrWhiteSpace($parent)) { throw "Path must include a parent folder: $pathToCheck" }
             if (Test-Path -LiteralPath $parent -PathType Leaf) { throw "Parent path is a file, not a folder: $parent" }
+            if (-not (Test-Path -LiteralPath $parent -PathType Container)) { throw "$($check.Label) folder does not exist: $parent" }
         }
     }
 
@@ -894,6 +896,7 @@ function Start-GuiMode {
             $openLogButton.Enabled = $false
 
             if (-not (Test-Path -LiteralPath $pstBox.Text -PathType Leaf)) { throw 'Choose an existing PST file.' }
+            if ([IO.Path]::GetExtension($pstBox.Text) -ine '.pst') { throw "Selected file is not a .pst: $([IO.Path]::GetFileName($pstBox.Text))" }
             Update-OutputPathsFromPstPath
             Assert-GuiOutputPathsValid
 
