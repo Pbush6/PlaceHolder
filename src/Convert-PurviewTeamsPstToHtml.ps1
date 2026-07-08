@@ -622,6 +622,58 @@ function Wait-StoreRootForPst {
     return $null
 }
 
+function Test-PstStoreAttached {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Namespace,
+        [Parameter(Mandatory = $true)] [string]$TargetPath
+    )
+
+    $root = Find-StoreRootForPst -Namespace $Namespace -TargetPath $TargetPath
+    if ($null -ne $root) { Close-ComObjectSafe $root; return $true }
+    return $false
+}
+
+function Remove-PstStoreFromOutlook {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Namespace,
+        [Parameter(Mandatory = $true)] [string]$TargetPath,
+        [AllowNull()] [object]$RootFolder
+    )
+
+    $targetRoot = $RootFolder
+    $discovered = $false
+    if ($null -eq $targetRoot) {
+        $targetRoot = Find-StoreRootForPst -Namespace $Namespace -TargetPath $TargetPath
+        $discovered = $null -ne $targetRoot
+    }
+    if ($null -eq $targetRoot) { return $false }
+
+    Invoke-OutlookComOperation -Operation 'detaching the PST from Outlook' -ScriptBlock { $Namespace.RemoveStore($targetRoot) } | Out-Null
+    if ($discovered) { Close-ComObjectSafe $targetRoot }
+    return $true
+}
+
+function Confirm-OutlookPstCleanup {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Namespace,
+        [Parameter(Mandatory = $true)] [string]$TargetPath,
+        [AllowNull()] [object]$RootFolder
+    )
+
+    [void](Remove-PstStoreFromOutlook -Namespace $Namespace -TargetPath $TargetPath -RootFolder $RootFolder)
+    if (Test-PstStoreAttached -Namespace $Namespace -TargetPath $TargetPath) {
+        Write-ReportLog 'PST still attached after detach; retrying once.' 'WARN'
+        [void](Remove-PstStoreFromOutlook -Namespace $Namespace -TargetPath $TargetPath -RootFolder $null)
+    }
+    if (Test-PstStoreAttached -Namespace $Namespace -TargetPath $TargetPath) {
+        Write-ReportLog "PST is still attached to your Outlook profile: $TargetPath. Remove it manually in Outlook (File -> Account Settings -> Data Files), then verify your profile is unchanged." 'WARN'
+        return $false
+    }
+
+    Write-ReportLog 'Verified PST detached from Outlook profile; Outlook left as before this conversion.'
+    return $true
+}
+
 function Assert-StaForOutlookCom {
     if ($UseSampleData) { return }
     $state = [System.Threading.Thread]::CurrentThread.ApartmentState
@@ -1269,7 +1321,7 @@ function Invoke-ReportConversion {
     $namespace = $null
     $root = $null
     $records = New-Object System.Collections.Generic.List[object]
-    $attached = $false
+    $weAttached = $false
 
     try {
         Write-ReportLog "Starting PST to HTML conversion. PST: $($pstItem.FullName)"
@@ -1282,13 +1334,19 @@ function Invoke-ReportConversion {
             $outlook = Invoke-OutlookComOperation -Operation 'starting Outlook COM automation' -ScriptBlock { New-Object -ComObject Outlook.Application }
             $namespace = Invoke-OutlookComOperation -Operation 'opening the Outlook MAPI namespace' -ScriptBlock { $outlook.GetNamespace('MAPI') }
 
-            Write-ReportLog 'Attaching PST to Outlook profile temporarily.'
-            Invoke-OutlookComOperation -Operation 'attaching the PST to Outlook' -ScriptBlock { $namespace.AddStoreEx($pstItem.FullName, 3) } | Out-Null # 3 = Unicode PST
-            $attached = $true
+            $root = Invoke-OutlookComOperation -Operation 'checking whether the PST is already attached' -ScriptBlock { Find-StoreRootForPst -Namespace $namespace -TargetPath $pstItem.FullName }
+            if ($null -ne $root) {
+                Write-ReportLog 'PST is already attached to Outlook; reusing the existing store (it will remain attached when finished).'
+            }
+            else {
+                Write-ReportLog 'Attaching PST to Outlook profile temporarily.'
+                Invoke-OutlookComOperation -Operation 'attaching the PST to Outlook' -ScriptBlock { $namespace.AddStoreEx($pstItem.FullName, 3) } | Out-Null # 3 = Unicode PST
+                $weAttached = $true
 
-            $root = Invoke-OutlookComOperation -Operation 'locating the attached PST in Outlook' -MaxAttempts 10 -ScriptBlock { Wait-StoreRootForPst -Namespace $namespace -TargetPath $pstItem.FullName -TimeoutSeconds 30 }
-            if ($null -eq $root) {
-                throw 'Could not locate the attached PST in Outlook stores after waiting up to 30 seconds.'
+                $root = Invoke-OutlookComOperation -Operation 'locating the attached PST in Outlook' -MaxAttempts 10 -ScriptBlock { Wait-StoreRootForPst -Namespace $namespace -TargetPath $pstItem.FullName -TimeoutSeconds 30 }
+                if ($null -eq $root) {
+                    throw 'Could not locate the attached PST in Outlook stores after waiting up to 30 seconds.'
+                }
             }
 
             $rootName = Get-PropSafe -Object $root -Name 'Name' -Default $pstItem.BaseName
@@ -1307,16 +1365,17 @@ function Invoke-ReportConversion {
         throw
     }
     finally {
-        if ($attached -and -not $KeepPstAttached) {
+        if ($weAttached -and -not $KeepPstAttached -and $null -ne $namespace) {
+            Write-ReportLog 'Detaching PST from Outlook profile.'
+            Write-ConversionStage -Stage 'Detaching'
             try {
-                if ($null -ne $root) {
-                    Write-ReportLog 'Detaching PST from Outlook profile.'
-                    Write-ConversionStage -Stage 'Detaching'
-                    Invoke-OutlookComOperation -Operation 'detaching the PST from Outlook' -ScriptBlock { $namespace.RemoveStore($root) }
-                }
+                [void](Confirm-OutlookPstCleanup -Namespace $namespace -TargetPath $pstItem.FullName -RootFolder $root)
             }
             catch {
-                Write-ReportLog "Could not detach PST automatically. You may need to remove it from Outlook manually. $($_.Exception.Message)" 'WARN'
+                Write-ReportLog "Could not detach PST automatically. $($_.Exception.Message)" 'WARN'
+                if (Test-PstStoreAttached -Namespace $namespace -TargetPath $pstItem.FullName) {
+                    Write-ReportLog "PST is still attached to your Outlook profile: $($pstItem.FullName). Remove it manually in Outlook (File -> Account Settings -> Data Files), then verify your profile is unchanged." 'WARN'
+                }
             }
         }
 
