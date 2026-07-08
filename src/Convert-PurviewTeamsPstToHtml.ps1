@@ -309,7 +309,7 @@ function Test-LikelyPersonName {
     if ($parts.Count -lt 2 -or $parts.Count -gt 5) { return $false }
 
     foreach ($part in $parts) {
-        if ($part -notmatch "^[A-Za-z][A-Za-z'.-]*$") { return $false }
+        if ($part -notmatch "^[\p{L}][\p{L}'.\-]*$") { return $false }
     }
 
     return $true
