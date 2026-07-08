@@ -883,12 +883,12 @@ function Write-ReportHeader {
     param(
         [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
         [Parameter(Mandatory = $true)]$PstItem,
-        [Parameter(Mandatory = $true)][object[]]$SortedRecords,
-        [Parameter(Mandatory = $true)][string[]]$AllParticipants,
-        [Parameter(Mandatory = $true)][string[]]$OtherParticipants,
-        [Parameter(Mandatory = $true)][string[]]$ParticipantOptions,
-        [Parameter(Mandatory = $true)][string[]]$OtherParticipantOptions,
-        [Parameter(Mandatory = $true)][string[]]$FolderSummaryRows
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SortedRecords,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$AllParticipants,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$OtherParticipants,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$ParticipantOptions,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$OtherParticipantOptions,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderSummaryRows
     )
 
     $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
