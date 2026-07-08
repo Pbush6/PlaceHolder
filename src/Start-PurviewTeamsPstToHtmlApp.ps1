@@ -131,6 +131,10 @@ function Invoke-EmbeddedConversion {
 
         $stdoutBuilder = [System.Text.StringBuilder]::new()
         $proc = [System.Diagnostics.Process]::Start($psi)
+        # Drain stderr concurrently so a full stderr pipe buffer can't deadlock the
+        # synchronous stdout read below. ReadToEndAsync (StreamReader, .NET 4.5+) runs
+        # the stderr read on the thread pool without a PowerShell event handler.
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
         while (-not $proc.StandardOutput.EndOfStream) {
             $line = $proc.StandardOutput.ReadLine()
             [void]$stdoutBuilder.AppendLine($line)
@@ -138,7 +142,7 @@ function Invoke-EmbeddedConversion {
                 & $OnProgress $line
             }
         }
-        $stderr = $proc.StandardError.ReadToEnd()
+        $stderr = $stderrTask.Result
         $proc.WaitForExit()
         $stdout = $stdoutBuilder.ToString()
 
