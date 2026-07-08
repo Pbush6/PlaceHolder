@@ -525,7 +525,8 @@ function Read-OutlookFolder {
     $subFolders = $null
     try {
         $subFolders = $Folder.Folders
-        for ($j = 1; $j -le [int]$subFolders.Count; $j++) {
+        $subFolderCount = [int]$subFolders.Count
+        for ($j = 1; $j -le $subFolderCount; $j++) {
             $child = $null
             try {
                 $child = $subFolders.Item($j)
@@ -553,7 +554,8 @@ function Find-StoreRootForPst {
 
     $stores = $Namespace.Stores
     try {
-        for ($i = 1; $i -le [int]$stores.Count; $i++) {
+        $storeCount = [int]$stores.Count
+        for ($i = 1; $i -le $storeCount; $i++) {
             $store = $null
             try {
                 $store = $stores.Item($i)
