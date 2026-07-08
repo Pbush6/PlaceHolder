@@ -213,13 +213,6 @@ function ConvertTo-HtmlBody {
     return ($encoded -replace "`r?`n", '<br/>')
 }
 
-function ConvertTo-SearchText {
-    param([AllowNull()][object]$Value)
-    if ($null -eq $Value) { return '' }
-    $text = ([string]$Value) -replace '\s+', ' '
-    return $text.Trim().ToLowerInvariant()
-}
-
 function Close-ComObjectSafe {
     param([AllowNull()][object]$ComObject)
     if ($null -ne $ComObject -and [Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
@@ -458,14 +451,12 @@ function Get-MessageRecord {
     $participantKey = Get-ParticipantKey -Participants $participants
     $conversationSubject = if ([string]::IsNullOrWhiteSpace([string]$subject)) { '(no subject)' } else { [string]$subject }
 
-    $conversationSource = 'ParticipantsSubjectFolder'
     $conversationKey = "$participantKey`n$conversationSubject`n$FolderPath"
 
     [pscustomobject]@{
         SortTime             = $sortTime
         FolderPath           = $FolderPath
         Subject              = $subject
-        ConversationSource   = $conversationSource
         MessageClass         = $messageClass
         SenderName           = $senderName
         SenderEmail          = $senderEmail
@@ -1126,9 +1117,9 @@ function Get-SampleRecord {
     $script:Stats.ItemsAttempted = 3
     $script:Stats.ItemsExported = 3
     return @(
-        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:00:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; ConversationSource = 'ParticipantsSubjectFolder'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:00:00'; ReceivedTime = [datetime]'2024-01-01T09:00:05'; CreationTime = [datetime]'2024-01-01T09:00:05'; EntryId = 'sample-entry-1'; BodyText = 'Hello Linda. This sample validates HTML encoding: <script>alert(1)</script>'; AttachmentsHtml = '' }
-        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:01:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; ConversationSource = 'ParticipantsSubjectFolder'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:01:00'; ReceivedTime = [datetime]'2024-01-01T09:01:05'; CreationTime = [datetime]'2024-01-01T09:01:05'; EntryId = 'sample-entry-2'; BodyText = "Thanks.`nThis message has two lines."; AttachmentsHtml = "<div class='attachments'><strong>Attachments:</strong><table><tbody><tr><td>sample.pdf</td><td>sample.pdf</td><td>1234</td></tr></tbody></table></div>" }
-        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Other'; Subject = 'Fireflies note'; ConversationSource = 'ParticipantsSubjectFolder'; MessageClass = 'IPM.Note'; SenderName = 'Fireflies.ai Notetaker'; SenderEmail = 'bot@example.com'; SenderDisplay = 'Fireflies.ai Notetaker'; To = 'Torey Page'; Cc = ''; Participants = @('Fireflies.ai Notetaker','Torey Page'); ParticipantsKey = 'Fireflies.ai Notetaker || Torey Page'; ConversationKey = "Fireflies.ai Notetaker || Torey Page`nFireflies note`nSamplePst\Other"; ConversationTitle = 'Fireflies note'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Fireflies should appear in Other detected names / IDs.'; AttachmentsHtml = '' }
+        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:00:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:00:00'; ReceivedTime = [datetime]'2024-01-01T09:00:05'; CreationTime = [datetime]'2024-01-01T09:00:05'; EntryId = 'sample-entry-1'; BodyText = 'Hello Linda. This sample validates HTML encoding: <script>alert(1)</script>'; AttachmentsHtml = '' }
+        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:01:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:01:00'; ReceivedTime = [datetime]'2024-01-01T09:01:05'; CreationTime = [datetime]'2024-01-01T09:01:05'; EntryId = 'sample-entry-2'; BodyText = "Thanks.`nThis message has two lines."; AttachmentsHtml = "<div class='attachments'><strong>Attachments:</strong><table><tbody><tr><td>sample.pdf</td><td>sample.pdf</td><td>1234</td></tr></tbody></table></div>" }
+        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Other'; Subject = 'Fireflies note'; MessageClass = 'IPM.Note'; SenderName = 'Fireflies.ai Notetaker'; SenderEmail = 'bot@example.com'; SenderDisplay = 'Fireflies.ai Notetaker'; To = 'Torey Page'; Cc = ''; Participants = @('Fireflies.ai Notetaker','Torey Page'); ParticipantsKey = 'Fireflies.ai Notetaker || Torey Page'; ConversationKey = "Fireflies.ai Notetaker || Torey Page`nFireflies note`nSamplePst\Other"; ConversationTitle = 'Fireflies note'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Fireflies should appear in Other detected names / IDs.'; AttachmentsHtml = '' }
     )
 }
 
