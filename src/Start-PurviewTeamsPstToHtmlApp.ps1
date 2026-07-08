@@ -564,6 +564,9 @@ function Start-GuiMode {
         $outputBrowse.Enabled = $Enabled
         $logBrowse.Enabled = $Enabled
         $keepCheck.Enabled = $Enabled
+        $pstBox.Enabled = $Enabled
+        $outputBox.Enabled = $Enabled
+        $logBox.Enabled = $Enabled
     }
 
     function Assert-GuiOutputPathsValid {
@@ -634,9 +637,9 @@ function Start-GuiMode {
             try {
                 if ($proc.ExitCode -ne 0) {
                     $detail = ''
-                    if (Test-Path -LiteralPath $logBox.Text) {
+                    if (Test-Path -LiteralPath $script:activeConversion.LogPath) {
                         try {
-                            $recentLog = Get-Content -LiteralPath $logBox.Text -Tail 80 -ErrorAction Stop
+                            $recentLog = Get-Content -LiteralPath $script:activeConversion.LogPath -Tail 80 -ErrorAction Stop
                             $fatalLine = @($recentLog | Where-Object { $_ -match '\[(ERROR)\] Fatal error:' } | Select-Object -Last 1)
                             if ($fatalLine -and $fatalLine[0]) { $detail = "`n`nLog detail:`n$($fatalLine[0])" }
                         }
@@ -644,8 +647,8 @@ function Start-GuiMode {
                     }
                     throw "Converter exited with code $($proc.ExitCode). See the log file for details.$detail"
                 }
-                $script:lastReportPath = $outputBox.Text
-                $script:lastLogPath = $logBox.Text
+                $script:lastReportPath = $script:activeConversion.OutputPath
+                $script:lastLogPath = $script:activeConversion.LogPath
                 $openReportButton.Enabled = Test-Path -LiteralPath $script:lastReportPath
                 $openLogButton.Enabled = Test-Path -LiteralPath $script:lastLogPath
 
@@ -730,6 +733,11 @@ function Start-GuiMode {
             $script:conversionStartedAt = Get-Date
             $script:activeRunId = [guid]::NewGuid().ToString('N')
             $script:activeConversion = Start-EmbeddedConversionProcess -PstPath $pstBox.Text -OutputPath $outputBox.Text -LogPath $logBox.Text -DefaultConversationParticipants @() -KeepPstAttached:($keepCheck.Checked) -UseSampleData:$false -RunId $script:activeRunId
+            # Snapshot the normalized paths so mid-run edits to the (now-disabled) textboxes can't
+            # redirect the active-run fatal-detail read, completion report, or opened log.
+            $script:activeConversion | Add-Member -NotePropertyName PstPath -NotePropertyValue ([IO.Path]::GetFullPath($pstBox.Text))
+            $script:activeConversion | Add-Member -NotePropertyName OutputPath -NotePropertyValue ([IO.Path]::GetFullPath($outputBox.Text))
+            $script:activeConversion | Add-Member -NotePropertyName LogPath -NotePropertyValue ([IO.Path]::GetFullPath($logBox.Text))
             $progressTimer.Start()
         }
         catch {
