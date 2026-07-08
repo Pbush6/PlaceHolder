@@ -486,7 +486,10 @@ function Read-OutlookFolder {
             $item = $null
             try {
                 $script:Stats.ItemsAttempted++
-                $item = $items.Item($i)
+                # Retry a transient Outlook-busy rejection on the per-item fetch instead of
+                # letting the ItemReadFailures catch swallow the message. Genuine (non-RPC)
+                # read failures still throw here and are handled by the catch below.
+                $item = Invoke-OutlookComOperation -Operation "reading item $i in $FolderPath" -ScriptBlock { $items.Item($i) }
                 $messageClass = Get-PropSafe -Object $item -Name 'MessageClass' -Default ''
                 $body = Get-PropSafe -Object $item -Name 'Body' -Default $null
                 $subject = Get-PropSafe -Object $item -Name 'Subject' -Default $null
@@ -1255,7 +1258,7 @@ function Invoke-ReportConversion {
             try {
                 if ($null -ne $root) {
                     Write-ReportLog 'Detaching PST from Outlook profile.'
-                    $namespace.RemoveStore($root)
+                    Invoke-OutlookComOperation -Operation 'detaching the PST from Outlook' -ScriptBlock { $namespace.RemoveStore($root) }
                 }
             }
             catch {
