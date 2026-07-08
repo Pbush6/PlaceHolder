@@ -501,91 +501,11 @@ function Get-MessageRecord {
     }
 }
 
-function New-RecordSpill {
-    # Two-pass disk spill: pass 1 appends each record as one compact NDJSON line to a temp
-    # file (bounded RAM), keeping only a lightweight sort/group index and the global participant
-    # set in memory. Pass 2 (Write-HtmlReport) seeks each conversation group's lines back from disk.
-    $utf8 = [System.Text.UTF8Encoding]::new($false)
-    $path = [IO.Path]::Combine([IO.Path]::GetTempPath(), "purview-teams-spill-$([Guid]::NewGuid().ToString('N')).ndjson")
-    $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-    return @{
-        Path         = $path
-        Utf8         = $utf8
-        Stream       = $stream
-        Index        = New-Object System.Collections.Generic.List[object]
-        Participants = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    }
-}
-
-function Add-RecordToSpill {
-    param(
-        [Parameter(Mandatory = $true)][hashtable]$Spill,
-        [Parameter(Mandatory = $true)][object]$Record
-    )
-
-    $json = $Record | ConvertTo-Json -Compress -Depth 5
-    $jsonBytes = $Spill.Utf8.GetBytes($json)
-    $offset = $Spill.Stream.Position
-    $Spill.Stream.Write($jsonBytes, 0, $jsonBytes.Length)
-    $Spill.Stream.WriteByte([byte]10) # LF keeps the file valid NDJSON; reads use offset+length, not line scanning.
-
-    $sortTicks = if ($Record.SortTime) { ([datetime]$Record.SortTime).Ticks } else { [long]0 }
-    [void]$Spill.Index.Add([pscustomobject]@{
-        ConversationKey = $Record.ConversationKey
-        SortTimeTicks   = $sortTicks
-        ParticipantsKey = $Record.ParticipantsKey
-        Subject         = [string]$Record.Subject
-        FolderPath      = $Record.FolderPath
-        Offset          = $offset
-        Length          = $jsonBytes.Length
-    })
-    foreach ($p in @($Record.Participants)) {
-        if (-not [string]::IsNullOrWhiteSpace($p)) { [void]$Spill.Participants.Add($p) }
-    }
-}
-
-function Read-SpillRecordJson {
-    param(
-        [Parameter(Mandatory = $true)][System.IO.Stream]$Stream,
-        [Parameter(Mandatory = $true)][System.Text.Encoding]$Utf8,
-        [Parameter(Mandatory = $true)][long]$Offset,
-        [Parameter(Mandatory = $true)][int]$Length
-    )
-    $Stream.Position = $Offset
-    $buffer = [byte[]]::new($Length)
-    $read = 0
-    while ($read -lt $Length) {
-        $n = $Stream.Read($buffer, $read, $Length - $read)
-        if ($n -le 0) { break }
-        $read += $n
-    }
-    return $Utf8.GetString($buffer, 0, $read)
-}
-
-function ConvertFrom-SpillLine {
-    # Rehydrate one NDJSON line back to a record. ConvertFrom-Json returns DateTime fields as
-    # strings, so cast the four date fields back to [datetime] (or $null) to preserve type
-    # fidelity that Test-MissingDate and the ('o'/display) formatting depend on.
-    param([Parameter(Mandatory = $true)][string]$Line)
-
-    $record = $Line | ConvertFrom-Json
-    foreach ($field in @('SortTime', 'SentOn', 'ReceivedTime', 'CreationTime')) {
-        $value = $record.$field
-        if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
-            $record.$field = [datetime]$value
-        }
-        else {
-            $record.$field = $null
-        }
-    }
-    return $record
-}
-
 function Read-OutlookFolder {
     param(
         [Parameter(Mandatory = $true)] [object]$Folder,
         [Parameter(Mandatory = $true)] [string]$FolderPath,
-        [Parameter(Mandatory = $true)] [hashtable]$Spill
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$Records
     )
 
     $script:Stats.FoldersScanned++
@@ -611,16 +531,16 @@ function Read-OutlookFolder {
                 # Purview Teams messages are usually mail-like items in an Exchange PST. Export any
                 # item that has normal message properties instead of requiring one exact MessageClass.
                 if ($messageClass -or $body -or $subject) {
-                    Add-RecordToSpill -Spill $Spill -Record (Get-MessageRecord -Item $item -FolderPath $FolderPath)
+                    [void]$Records.Add((Get-MessageRecord -Item $item -FolderPath $FolderPath))
                     $script:Stats.ItemsExported++
                 }
                 else {
                     $script:Stats.ItemsSkipped++
                 }
 
-                if ($Spill.Index.Count -gt 0 -and $Spill.Index.Count % $LogEvery -eq 0) {
+                if ($Records.Count -gt 0 -and $Records.Count % $LogEvery -eq 0) {
                     Write-ConversionProgress -FolderPath $FolderPath
-                    Write-ReportLog "Collected $($Spill.Index.Count) message-like items so far."
+                    Write-ReportLog "Collected $($Records.Count) message-like items so far."
                 }
             }
             catch {
@@ -645,7 +565,7 @@ function Read-OutlookFolder {
             try {
                 $child = $subFolders.Item($j)
                 $childName = Get-PropSafe -Object $child -Name 'Name' -Default "Folder$j"
-                Read-OutlookFolder -Folder $child -FolderPath "$FolderPath\$childName" -Spill $Spill
+                Read-OutlookFolder -Folder $child -FolderPath "$FolderPath\$childName" -Records $Records
             }
             catch {
                 Write-ReportLog "Could not scan child folder under $FolderPath. $($_.Exception.Message)" 'WARN'
@@ -1233,18 +1153,22 @@ function Get-SampleRecord {
 
 function Write-HtmlReport {
     param(
-        [Parameter(Mandatory = $true)][hashtable]$Spill,
+        [Parameter(Mandatory = $true)][object]$Records,
         [Parameter(Mandatory = $true)]$PstItem,
         [Parameter(Mandatory = $true)][string]$ReportPath
     )
 
     Write-ReportLog 'Preparing HTML report data.'
     Write-ConversionStage -Stage 'PreparingReport'
+    $sorted = @($Records | Sort-Object @{ Expression = { if ($_.SortTime) { ([datetime]$_.SortTime).Ticks } else { 0 } } }, ParticipantsKey, Subject, FolderPath)
 
-    # Sort/group off the tiny in-RAM index only; full records stay on disk until their group is written.
-    $sortedIndex = @($Spill.Index | Sort-Object @{ Expression = { $_.SortTimeTicks } }, ParticipantsKey, Subject, FolderPath)
-
-    $allParticipants = @($Spill.Participants | Sort-Object)
+    $participantSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($record in $sorted) {
+        foreach ($participant in @($record.Participants)) {
+            if (-not [string]::IsNullOrWhiteSpace($participant)) { [void]$participantSet.Add($participant) }
+        }
+    }
+    $allParticipants = @($participantSet | Sort-Object)
     $likelyParticipants = @($allParticipants | Where-Object { Test-LikelyPersonName $_ })
     $otherParticipants = @($allParticipants | Where-Object { -not (Test-LikelyPersonName $_) })
     $likelyParticipantSet = @{}
@@ -1252,16 +1176,14 @@ function Write-HtmlReport {
 
     $participantOptions = @(foreach ($participant in $likelyParticipants) { Format-ParticipantOptionHtml -Participant $participant -DefaultParticipants $DefaultConversationParticipants })
     $otherParticipantOptions = @(foreach ($participant in $otherParticipants) { Format-ParticipantOptionHtml -Participant $participant -DefaultParticipants $DefaultConversationParticipants })
-    $folderSummaryRows = @($sortedIndex | Group-Object FolderPath | Sort-Object Name | ForEach-Object { '<tr><td>{0}</td><td>{1}</td></tr>' -f (ConvertTo-HtmlEncodedText $_.Name), $_.Count })
+    $folderSummaryRows = @($sorted | Group-Object FolderPath | Sort-Object Name | ForEach-Object { '<tr><td>{0}</td><td>{1}</td></tr>' -f (ConvertTo-HtmlEncodedText $_.Name), $_.Count })
 
-    # Group index entries by conversation, preserving first-appearance order in the sorted index
-    # (identical to the previous whole-record grouping, since within-group order follows the sort).
     $groups = [ordered]@{}
-    foreach ($entry in $sortedIndex) {
-        if (-not $groups.Contains($entry.ConversationKey)) {
-            $groups[$entry.ConversationKey] = New-Object System.Collections.Generic.List[object]
+    foreach ($record in $sorted) {
+        if (-not $groups.Contains($record.ConversationKey)) {
+            $groups[$record.ConversationKey] = New-Object System.Collections.Generic.List[object]
         }
-        [void]$groups[$entry.ConversationKey].Add($entry)
+        [void]$groups[$record.ConversationKey].Add($record)
     }
 
     $groupCount = [Math]::Max(1, $groups.Count)
@@ -1270,20 +1192,13 @@ function Write-HtmlReport {
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
-    $reader = [System.IO.File]::Open($Spill.Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
     try {
-        Write-ReportHeader -Writer $writer -PstItem $PstItem -SortedRecords $sortedIndex -AllParticipants $allParticipants -OtherParticipants $otherParticipants -ParticipantOptions $participantOptions -OtherParticipantOptions $otherParticipantOptions -FolderSummaryRows $folderSummaryRows
+        Write-ReportHeader -Writer $writer -PstItem $PstItem -SortedRecords $sorted -AllParticipants $allParticipants -OtherParticipants $otherParticipants -ParticipantOptions $participantOptions -OtherParticipantOptions $otherParticipantOptions -FolderSummaryRows $folderSummaryRows
         $senderClasses = @{}
         $nextSenderIndex = 0
         $writtenGroups = 0
         foreach ($key in $groups.Keys) {
-            $groupRecords = New-Object System.Collections.Generic.List[object]
-            foreach ($entry in $groups[$key]) {
-                $json = Read-SpillRecordJson -Stream $reader -Utf8 $Spill.Utf8 -Offset $entry.Offset -Length $entry.Length
-                [void]$groupRecords.Add((ConvertFrom-SpillLine $json))
-            }
-            Write-ConversationHtml -Writer $writer -GroupMessages $groupRecords.ToArray() -PreferredParticipants $likelyParticipantSet -SenderClasses $senderClasses -NextSenderIndex ([ref]$nextSenderIndex)
-            $groupRecords = $null # release this conversation's records before reading the next group
+            Write-ConversationHtml -Writer $writer -GroupMessages $groups[$key].ToArray() -PreferredParticipants $likelyParticipantSet -SenderClasses $senderClasses -NextSenderIndex ([ref]$nextSenderIndex)
             $writtenGroups++
             if (($writtenGroups -eq $groupCount) -or ($writtenGroups % 50 -eq 0)) {
                 Write-ReportLog "HTML report progress: $writtenGroups of $groupCount conversations."
@@ -1295,7 +1210,6 @@ function Write-HtmlReport {
         Write-ReportFooter -Writer $writer
     }
     finally {
-        $reader.Dispose()
         $writer.Dispose()
     }
 }
@@ -1354,7 +1268,7 @@ function Invoke-ReportConversion {
     $outlook = $null
     $namespace = $null
     $root = $null
-    $spill = New-RecordSpill
+    $records = New-Object System.Collections.Generic.List[object]
     $attached = $false
 
     try {
@@ -1362,7 +1276,7 @@ function Invoke-ReportConversion {
         Write-ReportLog "PST size bytes: $($pstItem.Length)"
 
         if ($UseSampleData) {
-            foreach ($record in (Get-SampleRecord)) { Add-RecordToSpill -Spill $spill -Record $record }
+            foreach ($record in (Get-SampleRecord)) { [void]$records.Add($record) }
         }
         else {
             $outlook = Invoke-OutlookComOperation -Operation 'starting Outlook COM automation' -ScriptBlock { New-Object -ComObject Outlook.Application }
@@ -1378,16 +1292,12 @@ function Invoke-ReportConversion {
             }
 
             $rootName = Get-PropSafe -Object $root -Name 'Name' -Default $pstItem.BaseName
-            Read-OutlookFolder -Folder $root -FolderPath $rootName -Spill $spill
+            Read-OutlookFolder -Folder $root -FolderPath $rootName -Records $records
         }
 
-        Write-ReportLog "Finished reading PST. Message-like items collected: $($spill.Index.Count)"
+        Write-ReportLog "Finished reading PST. Message-like items collected: $($records.Count)"
         Write-ConversionStage -Stage 'FinishedReading'
-        # Close the write handle so pass 2 can reopen the spill for random-access group reads.
-        $spill.Stream.Flush()
-        $spill.Stream.Dispose()
-        $spill.Stream = $null
-        Write-HtmlReport -Spill $spill -PstItem $pstItem -ReportPath $script:OutputPath
+        Write-HtmlReport -Records $records.ToArray() -PstItem $pstItem -ReportPath $script:OutputPath
         Write-ReportLog "HTML report written to $script:OutputPath"
         Write-ConversionStage -Stage 'ReportWritten'
         Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures)
@@ -1418,18 +1328,6 @@ function Invoke-ReportConversion {
         Close-ComObjectSafe $outlook
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
-
-        # Always release the temp spill file, even on error mid-read.
-        if ($null -ne $spill) {
-            if ($null -ne $spill.Stream) {
-                try { $spill.Stream.Dispose() } catch { Write-ReportLog "Could not dispose spill stream. $($_.Exception.Message)" 'WARN' }
-                $spill.Stream = $null
-            }
-            if (-not [string]::IsNullOrEmpty($spill.Path) -and (Test-Path -LiteralPath $spill.Path)) {
-                try { Remove-Item -LiteralPath $spill.Path -Force }
-                catch { Write-ReportLog "Could not delete temp spill file $($spill.Path). $($_.Exception.Message)" 'WARN' }
-            }
-        }
 
         if ($null -ne $script:LogWriter) {
             $script:LogWriter.Dispose()
