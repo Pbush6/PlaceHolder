@@ -35,6 +35,18 @@ function New-EmbeddedCoreScript {
     [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
     $corePath = Join-Path $tempRoot 'Convert-PurviewTeamsPstToHtml.ps1'
     [IO.File]::WriteAllBytes($corePath, $coreBytes)
+    # Read the file back and confirm it matches what we decoded (guards against on-disk
+    # tampering or a partial write between here and launch). Mismatch => clean up, no leak.
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $expectedHash = [BitConverter]::ToString($sha.ComputeHash($coreBytes))
+        $actualHash = [BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($corePath)))
+    }
+    finally { $sha.Dispose() }
+    if ($expectedHash -ne $actualHash) {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        throw 'The packaged converter failed an integrity check. Please reinstall the application.'
+    }
     return $corePath
 }
 
