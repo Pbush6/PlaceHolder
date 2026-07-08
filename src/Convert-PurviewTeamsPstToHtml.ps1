@@ -1029,6 +1029,10 @@ function Write-ConversationHtml {
   <div class='conversation-messages'>
 "@)
 
+    # Normalize the conversation's participant set once; every message reuses these instead of
+    # re-normalizing the whole group per message when building its "other people" list.
+    $groupParticipantInfo = @($groupParticipants | ForEach-Object { [pscustomobject]@{ Name = $_; Normalized = (ConvertTo-NormalizedPersonName $_) } })
+
     foreach ($record in $GroupMessages) {
         if (-not $SenderClasses.ContainsKey($record.SenderDisplay)) {
             $SenderClasses[$record.SenderDisplay] = $palette[$NextSenderIndex.Value % $palette.Count]
@@ -1039,10 +1043,9 @@ function Write-ConversationHtml {
         $messageDate = if ($record.SortTime) { ([datetime]$record.SortTime).ToString('yyyy-MM-dd') } else { '' }
         $messageSortTime = if ($record.SortTime) { ([datetime]$record.SortTime).ToString('o') } else { '' }
         $senderParticipantName = ConvertTo-NormalizedPersonName $record.SenderDisplay
-        $otherPeople = @($groupParticipants | Where-Object {
-            $normalized = ConvertTo-NormalizedPersonName $_
-            -not [string]::IsNullOrWhiteSpace($normalized) -and $normalized -ne $senderParticipantName
-        })
+        $otherPeople = @($groupParticipantInfo | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_.Normalized) -and $_.Normalized -ne $senderParticipantName
+        } | ForEach-Object { $_.Name })
         if ($otherPeople.Count -eq 0 -and $groupParticipants.Count -gt 1) {
             $otherPeople = @($groupParticipants | Where-Object { $_ -ne $record.SenderDisplay })
         }
