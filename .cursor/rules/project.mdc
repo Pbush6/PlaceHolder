@@ -1,0 +1,35 @@
+---
+description: Purview Teams PST to HTML Converter project context
+alwaysApply: true
+---
+
+# PurviewTeamsPstToHtmlApp
+
+This folder is a **standalone Cursor project** for the Purview Teams PST→HTML converter.
+
+## Paths
+
+- **Project root (source):** this repository (`PurviewTeamsPstToHtmlApp`)
+- **Build output:** `build/` (gitignored EXEs)
+- **User deliverables:** `C:\Users\pbush\OneDrive - Perfection Learning\Documents\AI\Cursor Output\PurviewTeamsPstToHtmlApp`
+- **Do not modify:** `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` (originals)
+
+## Build
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version <x.y.z.w>
+```
+
+Then copy EXEs from `build\` to the Cursor Output folder above.
+
+## Architecture
+
+- **Core:** `src\Convert-PurviewTeamsPstToHtml.ps1` (PowerShell 7, `-Sta`, Outlook COM)
+- **Launcher:** `src\Start-PurviewTeamsPstToHtmlApp.ps1` (WinForms, embeds core as Base64)
+- After core changes, always re-embed via `build.ps1` before shipping EXEs.
+
+## Conventions
+
+- Prefer in-memory PST read path (T13 disk-spill was reverted for speed).
+- Detach only PSTs this run attached; leave pre-existing attachments alone.
+- Sample-data smoke: `-NoGui -UseSampleData`, expect `exported=3`.
