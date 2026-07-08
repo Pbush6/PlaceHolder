@@ -844,21 +844,33 @@ function Start-GuiMode {
                 }
                 $script:lastReportPath = $script:activeConversion.OutputPath
                 $script:lastLogPath = $script:activeConversion.LogPath
-                $openReportButton.Enabled = Test-Path -LiteralPath $script:lastReportPath
                 $openLogButton.Enabled = Test-Path -LiteralPath $script:lastLogPath
+
+                # Exit 0 is necessary but not sufficient: if the report file is missing the run
+                # produced no output, so treat it as a failure instead of falsely reporting success.
+                if (-not ($script:lastReportPath -and (Test-Path -LiteralPath $script:lastReportPath))) {
+                    $openReportButton.Enabled = $false
+                    throw "Converter reported success but the report file was not found: $script:lastReportPath"
+                }
+                $openReportButton.Enabled = $true
 
                 Set-ConversionProgress 100 'Conversion completed successfully. Opening report...'
                 & $appendLog 'Conversion completed successfully.'
-                if ($script:lastReportPath -and (Test-Path -LiteralPath $script:lastReportPath)) {
-                    try {
-                        Start-Process -FilePath $script:lastReportPath
-                        & $appendLog "Opened report: $script:lastReportPath"
-                    }
-                    catch {
-                        & $appendLog ("Could not open report automatically: " + $_.Exception.Message)
-                    }
+                $reportOpened = $false
+                try {
+                    Start-Process -FilePath $script:lastReportPath
+                    $reportOpened = $true
+                    & $appendLog "Opened report: $script:lastReportPath"
                 }
-                [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReport:`n$script:lastReportPath`n`nThe report has been opened in your default browser.", 'Conversion complete', 'OK', 'Information') | Out-Null
+                catch {
+                    & $appendLog ("Could not open report automatically: " + $_.Exception.Message)
+                }
+                if ($reportOpened) {
+                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReport:`n$script:lastReportPath`n`nThe report has been opened in your default browser.", 'Conversion complete', 'OK', 'Information') | Out-Null
+                }
+                else {
+                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReport:`n$script:lastReportPath`n`nThe report could not be opened automatically; open it manually.", 'Conversion complete', 'OK', 'Information') | Out-Null
+                }
             }
             catch {
                 $progressBar.Style = 'Continuous'
