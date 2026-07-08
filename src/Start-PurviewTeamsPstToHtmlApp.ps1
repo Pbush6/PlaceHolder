@@ -162,6 +162,174 @@ function Invoke-EmbeddedConversion {
         }
     }
 }
+# --- Child process lifetime: Win32 Job Object + tree kill -------------------------------
+# The launcher holds ONE kill-on-close Job Object for its whole lifetime. The child pwsh is
+# assigned to it, so if the launcher process is hard-killed the OS closes the handle and reaps
+# the child (and any descendants it spawned). Explicit stop still uses taskkill /T for an
+# immediate tree kill; the two mechanisms are complementary.
+$script:JobObjectSource = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class PurviewJobNative
+{
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetInformationJobObject(IntPtr hJob, int JobObjectInfoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IO_COUNTERS
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    public const int JobObjectExtendedLimitInformation = 9;
+    public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+
+    // Marshaling JOBOBJECT_EXTENDED_LIMIT_INFORMATION by hand from PowerShell 5.1 is
+    // error-prone, so create + configure the kill-on-close job here and hand back the handle.
+    public static IntPtr CreateKillOnCloseJob()
+    {
+        IntPtr hJob = CreateJobObject(IntPtr.Zero, null);
+        if (hJob == IntPtr.Zero) { return IntPtr.Zero; }
+
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+        IntPtr ptr = Marshal.AllocHGlobal(length);
+        try
+        {
+            Marshal.StructureToPtr(info, ptr, false);
+            if (!SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, ptr, (uint)length))
+            {
+                CloseHandle(hJob);
+                return IntPtr.Zero;
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(ptr);
+        }
+        return hJob;
+    }
+}
+'@
+
+$script:launcherJobHandle = [IntPtr]::Zero
+$script:launcherJobUnavailable = $false
+
+function Initialize-LauncherJobObject {
+    # Lazily creates the one launcher-lifetime kill-on-close Job Object. Returns its handle,
+    # or [IntPtr]::Zero if the type/handle could not be created. The handle is intentionally
+    # never closed - the OS closes it when the launcher exits, which is what reaps the child.
+    if ($script:launcherJobHandle -ne [IntPtr]::Zero) { return $script:launcherJobHandle }
+    if ($script:launcherJobUnavailable) { return [IntPtr]::Zero }
+    try {
+        if (-not ([System.Management.Automation.PSTypeName]'PurviewJobNative').Type) {
+            Add-Type -TypeDefinition $script:JobObjectSource -Language CSharp
+        }
+        $handle = [PurviewJobNative]::CreateKillOnCloseJob()
+        if ($handle -eq [IntPtr]::Zero) { $script:launcherJobUnavailable = $true; return [IntPtr]::Zero }
+        $script:launcherJobHandle = $handle
+        return $handle
+    }
+    catch {
+        $script:launcherJobUnavailable = $true
+        return [IntPtr]::Zero
+    }
+}
+
+function Add-ProcessToLauncherJob {
+    # Assigns a running process to the launcher job. A failure here must NOT abort the
+    # conversion - explicit stop still relies on Stop-ProcessTree.
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process)
+    try {
+        $handle = Initialize-LauncherJobObject
+        if ($handle -eq [IntPtr]::Zero) { return $false }
+        return [PurviewJobNative]::AssignProcessToJobObject($handle, $Process.Handle)
+    }
+    catch { return $false }
+}
+
+function Stop-ProcessTree {
+    # Terminates a child process AND its descendants. .NET Framework's Process.Kill() has no
+    # tree overload, so grandchildren (a pwsh that spawned more, Outlook COM helpers) would be
+    # orphaned. taskkill /T /F kills the whole tree; fall back to Kill() if taskkill can't run.
+    # Never throws - safe to call from teardown/FormClosing paths.
+    param([AllowNull()][System.Diagnostics.Process]$Process)
+    if ($null -eq $Process) { return }
+    $procId = -1
+    try {
+        if ($Process.HasExited) { return }
+        $procId = $Process.Id
+    }
+    catch { return }
+    if ($procId -le 0) { return }
+
+    $treeKilled = $false
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = 'taskkill.exe'
+        $psi.Arguments = "/PID $procId /T /F"
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $killer = [System.Diagnostics.Process]::Start($psi)
+        if ($null -ne $killer) {
+            [void]$killer.WaitForExit(5000)
+            $treeKilled = $true
+        }
+    }
+    catch { $treeKilled = $false }
+
+    if (-not $treeKilled) {
+        try { if (-not $Process.HasExited) { $Process.Kill() } } catch { }
+    }
+}
+
 function Start-EmbeddedConversionProcess {
     param(
         [string]$PstPath,
@@ -202,6 +370,9 @@ function Start-EmbeddedConversionProcess {
             if ($null -ne $EventArgs.Data) { $Event.MessageData.Enqueue($EventArgs.Data) }
         }
         [void]$proc.Start()
+        # Bind the child to the launcher job before it spawns descendants so KILL_ON_JOB_CLOSE
+        # reaps the whole tree if the launcher dies. Best-effort: never abort the conversion.
+        [void](Add-ProcessToLauncherJob -Process $proc)
         $proc.BeginOutputReadLine()
 
         [pscustomobject]@{
@@ -693,8 +864,7 @@ function Start-GuiMode {
         }
         $progressTimer.Stop()
         try {
-            $proc = $script:activeConversion.Process
-            if ($proc -and -not $proc.HasExited) { $proc.Kill() }
+            Stop-ProcessTree -Process $script:activeConversion.Process
         }
         catch { }
         Stop-ConversionOutputReader -Conversion $script:activeConversion
