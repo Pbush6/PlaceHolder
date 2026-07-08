@@ -626,8 +626,10 @@ function Start-GuiMode {
     $form.Controls.Add($keepCheck)
 
     $convertButton = Add-Button 'Convert' 170 240 120
-    $openReportButton = Add-Button 'Open Report' 300 240 120
-    $openLogButton = Add-Button 'Open Log' 430 240 120
+    $cancelButton = Add-Button 'Cancel' 300 240 120
+    $openReportButton = Add-Button 'Open Report' 430 240 120
+    $openLogButton = Add-Button 'Open Log' 560 240 120
+    $cancelButton.Enabled = $false
     $openReportButton.Enabled = $false
     $openLogButton.Enabled = $false
 
@@ -740,6 +742,23 @@ function Start-GuiMode {
         $logBox.Enabled = $Enabled
     }
 
+    function Complete-ConversionTeardown {
+        # Shared, idempotent teardown for every stop path (completion, cancel, FormClosing,
+        # start failure): optionally tree-kill the child, stop the stdout reader, remove the
+        # temp dir, and clear active-run state. Callers manage their own UI control state.
+        param([switch]$KillProcess)
+        $conversion = $script:activeConversion
+        if ($null -ne $conversion) {
+            if ($KillProcess) { try { Stop-ProcessTree -Process $conversion.Process } catch { } }
+            Stop-ConversionOutputReader -Conversion $conversion
+            if (($conversion.PSObject.Properties.Name -contains 'TempDir') -and $conversion.TempDir -and (Test-Path -LiteralPath $conversion.TempDir)) {
+                Remove-Item -LiteralPath $conversion.TempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        $script:activeConversion = $null
+        $script:activeRunId = $null
+    }
+
     function Assert-GuiOutputPathsValid {
         if ([string]::IsNullOrWhiteSpace($outputBox.Text)) { throw 'Choose an output HTML report path.' }
         if ([string]::IsNullOrWhiteSpace($logBox.Text)) { throw 'Choose a log file path.' }
@@ -844,13 +863,9 @@ function Start-GuiMode {
                 [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Conversion failed', 'OK', 'Error') | Out-Null
             }
             finally {
-                Stop-ConversionOutputReader -Conversion $script:activeConversion
-                if ($script:activeConversion.TempDir -and (Test-Path -LiteralPath $script:activeConversion.TempDir)) {
-                    Remove-Item -LiteralPath $script:activeConversion.TempDir -Recurse -Force -ErrorAction SilentlyContinue
-                }
-                $script:activeConversion = $null
-                $script:activeRunId = $null
+                Complete-ConversionTeardown
                 Set-ConversionControlsEnabled $true
+                $cancelButton.Enabled = $false
             }
         }
     })
@@ -863,16 +878,7 @@ function Start-GuiMode {
             return
         }
         $progressTimer.Stop()
-        try {
-            Stop-ProcessTree -Process $script:activeConversion.Process
-        }
-        catch { }
-        Stop-ConversionOutputReader -Conversion $script:activeConversion
-        if ($script:activeConversion.TempDir -and (Test-Path -LiteralPath $script:activeConversion.TempDir)) {
-            Remove-Item -LiteralPath $script:activeConversion.TempDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        $script:activeConversion = $null
-        $script:activeRunId = $null
+        Complete-ConversionTeardown -KillProcess
     })
 
     $convertButton.Add_Click({
@@ -908,6 +914,7 @@ function Start-GuiMode {
             $script:activeConversion | Add-Member -NotePropertyName PstPath -NotePropertyValue ([IO.Path]::GetFullPath($pstBox.Text))
             $script:activeConversion | Add-Member -NotePropertyName OutputPath -NotePropertyValue ([IO.Path]::GetFullPath($outputBox.Text))
             $script:activeConversion | Add-Member -NotePropertyName LogPath -NotePropertyValue ([IO.Path]::GetFullPath($logBox.Text))
+            $cancelButton.Enabled = $true
             $progressTimer.Start()
         }
         catch {
@@ -917,14 +924,23 @@ function Start-GuiMode {
             $progressLabel.Text = 'Conversion failed.'
             & $appendLog ('FAILED: ' + $_.Exception.Message)
             [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Conversion failed', 'OK', 'Error') | Out-Null
-            Stop-ConversionOutputReader -Conversion $script:activeConversion
-            if ($script:activeConversion -and $script:activeConversion.TempDir -and (Test-Path -LiteralPath $script:activeConversion.TempDir)) {
-                Remove-Item -LiteralPath $script:activeConversion.TempDir -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            $script:activeConversion = $null
-            $script:activeRunId = $null
+            Complete-ConversionTeardown -KillProcess
             Set-ConversionControlsEnabled $true
+            $cancelButton.Enabled = $false
         }
+    })
+
+    $cancelButton.Add_Click({
+        if (-not $script:activeConversion) { return }
+        $progressTimer.Stop()
+        Complete-ConversionTeardown -KillProcess
+        Set-ConversionControlsEnabled $true
+        $cancelButton.Enabled = $false
+        $progressBar.Style = 'Continuous'
+        $progressBar.Value = 0
+        $script:lastProgressValue = 0
+        $progressLabel.Text = 'Conversion canceled.'
+        & $appendLog 'Conversion canceled.'
     })
 
     [void]$form.ShowDialog()
