@@ -335,7 +335,9 @@ function Stop-ProcessTree {
         $killer = [System.Diagnostics.Process]::Start($psi)
         if ($null -ne $killer) {
             [void]$killer.WaitForExit(5000)
-            $treeKilled = $true
+            if ($killer.HasExited -and $killer.ExitCode -eq 0) {
+                $treeKilled = $true
+            }
         }
     }
     catch { $treeKilled = $false }

@@ -2,6 +2,18 @@
 
 Generated: 2026-07-03
 
+## Cursor working-copy maintenance update (2026-07-08)
+
+This build-notes file originally described the Hermes working-copy/output flow and is now partially historical.
+For the current Cursor review/build pass, treat these as authoritative:
+
+- Active working copy: `C:\Users\pbush\OneDrive - Perfection Learning\Documents\AI\Cursor Working Directory\PurviewTeamsPstToHtmlApp`
+- Safe build output folder: `...\Cursor Working Directory\PurviewTeamsPstToHtmlApp\build`
+- Do **not** overwrite the original shipped EXE in `Documents\AI` during review builds.
+- Recommended hardening added in this pass: only treat `taskkill /T /F` as successful when it exits 0; otherwise fall back to `.Kill()`.
+
+Older sections below still document prior packaging milestones, but their path references may point at the Hermes/original output locations rather than this Cursor working copy.
+
 ## Source and output
 
 - Project folder: `C:\Users\pbush\OneDrive - Perfection Learning\Documents\AI\Hermes Working Directory\PurviewTeamsPstToHtmlApp`
