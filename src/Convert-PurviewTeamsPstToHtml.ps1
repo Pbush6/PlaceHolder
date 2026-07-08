@@ -62,6 +62,10 @@ $script:Stats = [ordered]@{
     AttachmentReadFailures = 0
 }
 
+# Single no-BOM, auto-flushing writer over the log file. Opened in Invoke-ReportConversion
+# (create/truncate = fresh log each run) and disposed in its finally block.
+$script:LogWriter = $null
+
 function ConvertTo-NormalizedInputPath {
     param([AllowNull()][string]$Path)
 
@@ -177,7 +181,7 @@ function Write-ReportLog {
     )
 
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 's'), $Level, $Message
-    Add-Content -LiteralPath $script:LogPath -Value $line -Encoding UTF8
+    if ($null -ne $script:LogWriter) { $script:LogWriter.WriteLine($line) }
     Write-Information $line -InformationAction Continue
 }
 
@@ -1212,8 +1216,11 @@ function Invoke-ReportConversion {
     }
 
     # Start each conversion with a fresh log so the GUI never reads stale final-stage lines
-    # from a previous run and shows cleanup/complete progress too early.
-    Set-Content -LiteralPath $script:LogPath -Value '' -Encoding UTF8
+    # from a previous run and shows cleanup/complete progress too early. Create/truncate mode
+    # clears the file; UTF8Encoding($false) writes no BOM so the GUI log-tail parser reads the
+    # first token cleanly; AutoFlush keeps lines visible to the live tail immediately.
+    $script:LogWriter = [System.IO.StreamWriter]::new($script:LogPath, $false, [System.Text.UTF8Encoding]::new($false))
+    $script:LogWriter.AutoFlush = $true
 
     if ($KeepPstAttached) {
         Write-Warning 'KeepPstAttached was specified. The PST will remain attached to the current Outlook profile unless you remove it manually.'
@@ -1279,6 +1286,11 @@ function Invoke-ReportConversion {
         Close-ComObjectSafe $outlook
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
+
+        if ($null -ne $script:LogWriter) {
+            $script:LogWriter.Dispose()
+            $script:LogWriter = $null
+        }
     }
 }
 
