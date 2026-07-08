@@ -721,8 +721,8 @@ function Start-GuiMode {
         $script:lastProgressValue = $boundedValue
         $progressBar.Value = $boundedValue
         $progressLabel.Text = $Status
-        $form.Refresh()
-        [System.Windows.Forms.Application]::DoEvents()
+        $progressBar.Update()
+        $progressLabel.Update()
     }
 
     function Reset-ConversionProgress([string]$Status) {
@@ -730,8 +730,8 @@ function Start-GuiMode {
         $progressBar.Style = 'Continuous'
         $progressBar.Value = 0
         $progressLabel.Text = $Status
-        $form.Refresh()
-        [System.Windows.Forms.Application]::DoEvents()
+        $progressBar.Update()
+        $progressLabel.Update()
     }
 
     function Set-ConversionControlsEnabled([bool]$Enabled) {
