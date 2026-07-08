@@ -691,7 +691,7 @@ function Start-GuiMode {
         $dialog.Filter = 'HTML report (*.html)|*.html|HTML report (*.htm)|*.htm|All files (*.*)|*.*'
         $dialog.Title = 'Choose output HTML report path'
         $dialog.FileName = [IO.Path]::GetFileName($outputBox.Text)
-        $dialog.InitialDirectory = Split-Path -Path $outputBox.Text -Parent
+        $dialog.InitialDirectory = Split-Path -LiteralPath $outputBox.Text
         if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
             $outputBox.Text = $dialog.FileName
             $script:autoNameOutputFromPst = $false
@@ -702,7 +702,7 @@ function Start-GuiMode {
         $dialog.Filter = 'Log file (*.log)|*.log|Text file (*.txt)|*.txt|All files (*.*)|*.*'
         $dialog.Title = 'Choose log file path'
         $dialog.FileName = [IO.Path]::GetFileName($logBox.Text)
-        $dialog.InitialDirectory = Split-Path -Path $logBox.Text -Parent
+        $dialog.InitialDirectory = Split-Path -LiteralPath $logBox.Text
         if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
             $logBox.Text = $dialog.FileName
             $script:autoNameOutputFromPst = $false
@@ -772,7 +772,7 @@ function Start-GuiMode {
         foreach ($check in @(@{ Label = 'Output'; Path = $outputFullPath }, @{ Label = 'Log'; Path = $logFullPath })) {
             $pathToCheck = $check.Path
             if (Test-Path -LiteralPath $pathToCheck -PathType Container) { throw "Path points to a folder, not a file: $pathToCheck" }
-            $parent = Split-Path -Path $pathToCheck -Parent
+            $parent = Split-Path -LiteralPath $pathToCheck
             if ([string]::IsNullOrWhiteSpace($parent)) { throw "Path must include a parent folder: $pathToCheck" }
             if (Test-Path -LiteralPath $parent -PathType Leaf) { throw "Parent path is a file, not a folder: $parent" }
             if (-not (Test-Path -LiteralPath $parent -PathType Container)) { throw "$($check.Label) folder does not exist: $parent" }
