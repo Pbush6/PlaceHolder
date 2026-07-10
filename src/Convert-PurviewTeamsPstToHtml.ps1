@@ -52,7 +52,13 @@ param(
     # (CONVERSION_PROGRESS / CONVERSION_STAGE / CONVERSION_RESULT) carries RunId=<id>
     # so the GUI can ignore any line not tagged with the current run's id.
     [Parameter(Mandatory = $false)]
-    [string]$RunId = ''
+    [string]$RunId = '',
+
+    [Parameter(Mandatory = $false)]
+    [bool]$TeamsReport = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$EmailReport = $true
 )
 
 Set-StrictMode -Version Latest
@@ -456,6 +462,29 @@ function Test-MissingDate {
     if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $true }
     if ($Value -is [datetime] -and $Value.Year -ge 4500) { return $true }
     return $false
+}
+
+# ponytail: keep in sync with ReportClassification.ps1
+function Test-IsTeamsMessagesFolder {
+    param([Parameter(Mandatory = $true)][string]$FolderPath)
+    return $FolderPath -match '(?i)(^|\\)(TeamsMessagesData|TeamsMeetings|Migrated-Teams-Chat|SubstrateHolds)(\\|$)'
+}
+
+function Test-IsEmailMessageClass {
+    param([AllowNull()][string]$MessageClass)
+    if ([string]::IsNullOrWhiteSpace($MessageClass)) { return $false }
+    if ($MessageClass -match '(?i)^IPM\.Schedule\.Meeting') { return $false }
+    return $MessageClass -match '(?i)^IPM\.Note'
+}
+
+function Get-ItemReportBucket {
+    param(
+        [Parameter(Mandatory = $true)][string]$FolderPath,
+        [AllowNull()][string]$MessageClass
+    )
+    if (Test-IsTeamsMessagesFolder -FolderPath $FolderPath) { return 'Teams' }
+    if (Test-IsEmailMessageClass -MessageClass $MessageClass) { return 'Email' }
+    return 'Skip'
 }
 
 function Get-MessageRecord {
@@ -1280,6 +1309,12 @@ function Write-HtmlReport {
 }
 
 function Invoke-ReportConversion {
+    if (-not $TeamsReport -and -not $EmailReport) {
+        $msg = 'At least one report type must be selected (TeamsReport and/or EmailReport).'
+        Write-Output ("CONVERSION_ERROR|{0}ExitCode=2|Message={1}" -f (Get-RunIdField), ($msg -replace '[\r\n|]', ' '))
+        throw $msg
+    }
+
     Assert-StaForOutlookCom
 
     $downloads = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
