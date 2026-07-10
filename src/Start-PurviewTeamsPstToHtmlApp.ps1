@@ -752,6 +752,7 @@ function Start-GuiMode {
     }
 
     function Update-PathsForReportSelection {
+        if (-not $teamsCheck.Checked -and -not $emailCheck.Checked) { return }
         $reportPaths = Get-ReportOutputPaths -DisplayPath $outputBox.Text -TeamsReport $teamsCheck.Checked -EmailReport $emailCheck.Checked
         $logPaths = Get-ReportOutputPaths -DisplayPath $logBox.Text -TeamsReport $teamsCheck.Checked -EmailReport $emailCheck.Checked
         $outputBox.Text = $reportPaths.DisplayPath
@@ -1128,7 +1129,7 @@ function Start-GuiMode {
             Assert-GuiOutputPathsValid
 
             $reportOutputPaths = Get-ReportOutputPaths -DisplayPath $outputBox.Text -TeamsReport $teamsCheck.Checked -EmailReport $emailCheck.Checked
-            $targetReportPaths = @($reportOutputPaths.DisplayPath, $reportOutputPaths.TeamsPath, $reportOutputPaths.EmailPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+            $targetReportPaths = @($reportOutputPaths.TeamsPath, $reportOutputPaths.EmailPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
             $existingReportPaths = @($targetReportPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
             if ($existingReportPaths.Count -gt 0) {
                 $overwriteAnswer = [System.Windows.Forms.MessageBox]::Show($form, "The following report file(s) already exist and will be overwritten:`n$($existingReportPaths -join "`n")`n`nContinue?", 'Overwrite existing report?', 'YesNo', 'Warning')
