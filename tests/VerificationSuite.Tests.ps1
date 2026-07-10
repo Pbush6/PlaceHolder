@@ -44,6 +44,15 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $embeddedHash | Should -Be $coreHash
     }
 
+    It 'passes the Teams and Email report flags through the launcher' {
+        $launcherText = Get-Content -LiteralPath $script:launcherPath -Raw
+        $launcherText | Should -Match '\[bool\]\$TeamsReport = \$true'
+        $launcherText | Should -Match '\[bool\]\$EmailReport = \$true'
+        $launcherText | Should -Match '(?s)ConvertTo-ArgumentList .* -TeamsReport:\$TeamsReport -EmailReport:\$EmailReport'
+        $launcherText | Should -Match '(?s)Invoke-EmbeddedConversion .* -TeamsReport:\$TeamsReport -EmailReport:\$EmailReport'
+        $launcherText | Should -Match '(?s)Start-EmbeddedConversionProcess .* -TeamsReport:\$teamsCheck\.Checked -EmailReport:\$emailCheck\.Checked'
+    }
+
     It 'runs the core sample path successfully with both reports' {
         $reportPath = Join-Path $TestDrive 'dual.html'
         $logPath = Join-Path $TestDrive 'dual.log'
@@ -83,7 +92,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $teamsLogPath = Join-Path $TestDrive 'launcher-sample_Teams.log'
         $emailLogPath = Join-Path $TestDrive 'launcher-sample_Email.log'
 
-        $result = & $script:invokePwshScriptCapture -FilePath $script:launcherPath -Arguments @('-NoGui', '-UseSampleData', '-OutputPath', $reportPath, '-LogPath', $logPath)
+        $result = & $script:invokePwshScriptCapture -FilePath $script:launcherPath -Arguments @('-NoGui', '-UseSampleData', '-TeamsReport:$true', '-EmailReport:$true', '-OutputPath', $reportPath, '-LogPath', $logPath)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath $teamsReportPath) | Should -BeTrue
@@ -121,8 +130,9 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $match = [regex]::Match($launcherText, '(?s)function Start-NoGuiMode \{(.+?)\r?\n\}')
         $match.Success | Should -BeTrue
         $body = $match.Groups[1].Value
-        $body | Should -Match 'Test-Path -LiteralPath \$reportPath'
-        $body | Should -Match 'report file was not found'
+        $body | Should -Match 'Get-ConversionPathsFromResultLine'
+        $body | Should -Match 'lastReportPaths'
+        $body | Should -Match 'one or more report files'
     }
 
     It 'builds debug and release executables' {

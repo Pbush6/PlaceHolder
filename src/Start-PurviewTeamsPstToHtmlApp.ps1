@@ -11,6 +11,8 @@ param(
     [string]$OutputPath,
     [string]$LogPath,
     [string[]]$DefaultConversationParticipants = @(),
+    [bool]$TeamsReport = $true,
+    [bool]$EmailReport = $true,
     [switch]$KeepPstAttached,
     [switch]$UseSampleData,
     [switch]$NoGui
@@ -57,6 +59,8 @@ function ConvertTo-ArgumentList {
         [string]$OutputPath,
         [string]$LogPath,
         [string[]]$DefaultConversationParticipants,
+        [bool]$TeamsReport,
+        [bool]$EmailReport,
         [switch]$KeepPstAttached,
         [switch]$UseSampleData,
         [string]$RunId
@@ -76,6 +80,8 @@ function ConvertTo-ArgumentList {
 
     if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $args.Add('-OutputPath'); $args.Add($OutputPath) }
     if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $args.Add('-LogPath'); $args.Add($LogPath) }
+    $args.Add(('-TeamsReport:' + $(if ($TeamsReport) { '$true' } else { '$false' })))
+    $args.Add(('-EmailReport:' + $(if ($EmailReport) { '$true' } else { '$false' })))
     if ($KeepPstAttached) { $args.Add('-KeepPstAttached') }
     if (-not [string]::IsNullOrWhiteSpace($RunId)) { $args.Add('-RunId'); $args.Add($RunId) }
     foreach ($participant in @($DefaultConversationParticipants)) {
@@ -95,6 +101,48 @@ function ConvertTo-NativeArgumentString {
         '"' + ($arg -replace '([\\]*)"', '$1$1\"' -replace '([\\]+)$', '$1$1') + '"'
     }
     return ($quoted -join ' ')
+}
+
+# ponytail: keep in sync with ReportPathNaming.ps1
+function Get-ReportPathBaseName {
+    param([Parameter(Mandatory = $true)][string]$FilePath)
+    $name = [IO.Path]::GetFileNameWithoutExtension($FilePath)
+    if ($name -match '(?i)_Teams$') { return $name.Substring(0, $name.Length - 6) }
+    if ($name -match '(?i)_Email$') { return $name.Substring(0, $name.Length - 6) }
+    return $name
+}
+
+function Get-ReportOutputPaths {
+    param(
+        [Parameter(Mandatory = $true)][string]$DisplayPath,
+        [Parameter(Mandatory = $true)][bool]$TeamsReport,
+        [Parameter(Mandatory = $true)][bool]$EmailReport
+    )
+    if (-not $TeamsReport -and -not $EmailReport) {
+        throw 'At least one of TeamsReport or EmailReport must be true.'
+    }
+    $dir = [IO.Path]::GetDirectoryName($DisplayPath)
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
+    $ext = [IO.Path]::GetExtension($DisplayPath)
+    if ([string]::IsNullOrWhiteSpace($ext)) { $ext = '.html' }
+    $base = Get-ReportPathBaseName -FilePath $DisplayPath
+    $teamsPath = $null
+    $emailPath = $null
+    $display = $null
+    if ($TeamsReport -and $EmailReport) {
+        $display = Join-Path $dir ($base + $ext)
+        $teamsPath = Join-Path $dir ($base + '_Teams' + $ext)
+        $emailPath = Join-Path $dir ($base + '_Email' + $ext)
+    }
+    elseif ($TeamsReport) {
+        $display = Join-Path $dir ($base + '_Teams' + $ext)
+        $teamsPath = $display
+    }
+    else {
+        $display = Join-Path $dir ($base + '_Email' + $ext)
+        $emailPath = $display
+    }
+    [pscustomobject]@{ DisplayPath = $display; TeamsPath = $teamsPath; EmailPath = $emailPath }
 }
 
 function Resolve-PowerShell7Path {
@@ -128,6 +176,8 @@ function Invoke-EmbeddedConversion {
         [string]$OutputPath,
         [string]$LogPath,
         [string[]]$DefaultConversationParticipants = @(),
+        [bool]$TeamsReport = $true,
+        [bool]$EmailReport = $true,
         [switch]$KeepPstAttached,
         [switch]$UseSampleData,
         [scriptblock]$OnProgress
@@ -139,7 +189,7 @@ function Invoke-EmbeddedConversion {
 
         $psi = [System.Diagnostics.ProcessStartInfo]::new()
         $psi.FileName = $pwsh
-        $childArgs = ConvertTo-ArgumentList -CorePath $corePath -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData
+        $childArgs = ConvertTo-ArgumentList -CorePath $corePath -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -TeamsReport:$TeamsReport -EmailReport:$EmailReport -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData
         $psi.Arguments = ConvertTo-NativeArgumentString -Argument $childArgs
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
@@ -354,6 +404,8 @@ function Start-EmbeddedConversionProcess {
         [string]$OutputPath,
         [string]$LogPath,
         [string[]]$DefaultConversationParticipants = @(),
+        [bool]$TeamsReport = $true,
+        [bool]$EmailReport = $true,
         [switch]$KeepPstAttached,
         [switch]$UseSampleData,
         [string]$RunId
@@ -367,7 +419,7 @@ function Start-EmbeddedConversionProcess {
 
         $psi = [System.Diagnostics.ProcessStartInfo]::new()
         $psi.FileName = $pwsh
-        $childArgs = ConvertTo-ArgumentList -CorePath $corePath -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData -RunId $RunId
+        $childArgs = ConvertTo-ArgumentList -CorePath $corePath -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -TeamsReport:$TeamsReport -EmailReport:$EmailReport -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData -RunId $RunId
         $psi.Arguments = ConvertTo-NativeArgumentString -Argument $childArgs
         $psi.UseShellExecute = $false
         # Redirect stdout so the run-ID-tagged progress/stage lines can drive the GUI.
@@ -519,6 +571,30 @@ function ConvertFrom-ResultLine {
     return $result
 }
 
+function Get-ConversionPathsFromResultLine {
+    param([AllowNull()][string]$ResultLine)
+    $parsed = ConvertFrom-ResultLine -ResultLine $ResultLine
+    $reportPaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($key in @('OutputPath', 'TeamsOutputPath', 'EmailOutputPath')) {
+        if ($parsed.ContainsKey($key)) {
+            $path = [string]$parsed[$key]
+            if (-not [string]::IsNullOrWhiteSpace($path) -and -not $reportPaths.Contains($path)) { [void]$reportPaths.Add($path) }
+        }
+    }
+    $logPaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($key in @('LogPath', 'TeamsLogPath', 'EmailLogPath')) {
+        if ($parsed.ContainsKey($key)) {
+            $path = [string]$parsed[$key]
+            if (-not [string]::IsNullOrWhiteSpace($path) -and -not $logPaths.Contains($path)) { [void]$logPaths.Add($path) }
+        }
+    }
+    [pscustomobject]@{
+        Parsed = $parsed
+        ReportPaths = $reportPaths.ToArray()
+        LogPaths = $logPaths.ToArray()
+    }
+}
+
 function Get-StdoutErrorDetail {
     param(
         [AllowNull()][string]$ErrorLine,
@@ -564,8 +640,11 @@ function Assert-OutlookAvailableForRealRun {
 
 function Start-NoGuiMode {
     try {
+        if (-not $TeamsReport -and -not $EmailReport) {
+            throw 'At least one report type must be selected (TeamsReport and/or EmailReport).'
+        }
         Assert-OutlookAvailableForRealRun -UseSampleData:$UseSampleData
-        $result = Invoke-EmbeddedConversion -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData
+        $result = Invoke-EmbeddedConversion -PstPath $PstPath -OutputPath $OutputPath -LogPath $LogPath -DefaultConversationParticipants $DefaultConversationParticipants -TeamsReport:$TeamsReport -EmailReport:$EmailReport -KeepPstAttached:$KeepPstAttached -UseSampleData:$UseSampleData
         if ($result.StdOut) { Write-Output $result.StdOut.TrimEnd() }
         # Surface child stderr without raising a terminating error, so stderr noise on a
         # successful (exit 0) run isn't turned into a failure. Success is decided strictly
@@ -579,15 +658,14 @@ function Start-NoGuiMode {
             [Environment]::Exit([int]$result.ExitCode)
         }
         # Exit 0 is necessary but not sufficient (same gate as GUI HasExited handler).
-        $reportPath = $OutputPath
-        if ($result.ResultLine) {
-            $parsed = ConvertFrom-ResultLine -ResultLine $result.ResultLine
-            if ($parsed.ContainsKey('OutputPath') -and -not [string]::IsNullOrWhiteSpace([string]$parsed['OutputPath'])) {
-                $reportPath = [string]$parsed['OutputPath']
-            }
-        }
-        if (-not ($reportPath -and (Test-Path -LiteralPath $reportPath))) {
-            [Console]::Error.WriteLine("Converter reported success but the report file was not found: $reportPath")
+        $paths = Get-ConversionPathsFromResultLine -ResultLine $result.ResultLine
+        $script:lastReportPaths = @($paths.ReportPaths)
+        $script:lastLogPaths = @($paths.LogPaths)
+        if (-not $script:lastReportPaths.Count) { $script:lastReportPaths = @($OutputPath) }
+        if (-not $script:lastLogPaths.Count) { $script:lastLogPaths = @($LogPath) }
+        $missingReports = @($script:lastReportPaths | Where-Object { -not (Test-Path -LiteralPath $_) })
+        if ($missingReports.Count -gt 0) {
+            [Console]::Error.WriteLine("Converter reported success but one or more report files were not found:`n$($missingReports -join "`n")")
             [Environment]::Exit(1)
         }
     }
@@ -617,9 +695,9 @@ function Start-GuiMode {
 
     $form = [System.Windows.Forms.Form]::new()
     $form.Text = 'Purview Teams PST to HTML Converter'
-    $form.Size = [System.Drawing.Size]::new(820, 620)
+    $form.Size = [System.Drawing.Size]::new(820, 680)
     $form.StartPosition = 'CenterScreen'
-    $form.MinimumSize = [System.Drawing.Size]::new(760, 560)
+    $form.MinimumSize = [System.Drawing.Size]::new(760, 620)
     $font = [System.Drawing.Font]::new('Segoe UI', 9)
     $form.Font = $font
 
@@ -670,7 +748,14 @@ function Start-GuiMode {
         foreach ($char in [IO.Path]::GetInvalidFileNameChars()) { $baseName = $baseName.Replace([string]$char, ' ') }
         $baseName = (($baseName -replace '\s+', ' ').Trim())
         if ([string]::IsNullOrWhiteSpace($baseName)) { return '' }
-        return "$baseName Teams Messages"
+        return "$baseName Messages"
+    }
+
+    function Update-PathsForReportSelection {
+        $reportPaths = Get-ReportOutputPaths -DisplayPath $outputBox.Text -TeamsReport $teamsCheck.Checked -EmailReport $emailCheck.Checked
+        $logPaths = Get-ReportOutputPaths -DisplayPath $logBox.Text -TeamsReport $teamsCheck.Checked -EmailReport $emailCheck.Checked
+        $outputBox.Text = $reportPaths.DisplayPath
+        $logBox.Text = $logPaths.DisplayPath
     }
 
     function Update-OutputPathsFromPstPath {
@@ -680,6 +765,7 @@ function Start-GuiMode {
         if ([string]::IsNullOrWhiteSpace($baseName)) { return }
         $outputBox.Text = Join-Path $defaultDir ($baseName + '.html')
         $logBox.Text = Join-Path $defaultDir ($baseName + '.log')
+        Update-PathsForReportSelection
         $script:autoNameOutputFromPst = $true
     }
 
@@ -705,22 +791,36 @@ function Start-GuiMode {
     $keepCheck.Size = [System.Drawing.Size]::new(260, 24)
     $form.Controls.Add($keepCheck)
 
-    $convertButton = Add-Button 'Convert' 170 240 120
-    $cancelButton = Add-Button 'Cancel' 300 240 120
-    $openReportButton = Add-Button 'Open Report' 430 240 120
-    $openLogButton = Add-Button 'Open Log' 560 240 120
+    $teamsCheck = [System.Windows.Forms.CheckBox]::new()
+    $teamsCheck.Text = 'Teams report'
+    $teamsCheck.Checked = $true
+    $teamsCheck.Location = [System.Drawing.Point]::new(170, 228)
+    $teamsCheck.Size = [System.Drawing.Size]::new(180, 24)
+    $form.Controls.Add($teamsCheck)
+
+    $emailCheck = [System.Windows.Forms.CheckBox]::new()
+    $emailCheck.Text = 'Email report'
+    $emailCheck.Checked = $true
+    $emailCheck.Location = [System.Drawing.Point]::new(170, 254)
+    $emailCheck.Size = [System.Drawing.Size]::new(180, 24)
+    $form.Controls.Add($emailCheck)
+
+    $convertButton = Add-Button 'Convert' 170 276 120
+    $cancelButton = Add-Button 'Cancel' 300 276 120
+    $openReportButton = Add-Button 'Open Report' 430 276 120
+    $openLogButton = Add-Button 'Open Log' 560 276 120
     $cancelButton.Enabled = $false
     $openReportButton.Enabled = $false
     $openLogButton.Enabled = $false
 
     $progressLabel = [System.Windows.Forms.Label]::new()
     $progressLabel.Text = 'Ready'
-    $progressLabel.Location = [System.Drawing.Point]::new(18, 282)
+    $progressLabel.Location = [System.Drawing.Point]::new(18, 318)
     $progressLabel.Size = [System.Drawing.Size]::new(768, 20)
     $form.Controls.Add($progressLabel)
 
     $progressBar = [System.Windows.Forms.ProgressBar]::new()
-    $progressBar.Location = [System.Drawing.Point]::new(18, 304)
+    $progressBar.Location = [System.Drawing.Point]::new(18, 340)
     $progressBar.Size = [System.Drawing.Size]::new(768, 18)
     $progressBar.Minimum = 0
     $progressBar.Maximum = 100
@@ -729,7 +829,7 @@ function Start-GuiMode {
     $form.Controls.Add($progressBar)
 
     $logText = [System.Windows.Forms.TextBox]::new()
-    $logText.Location = [System.Drawing.Point]::new(18, 334)
+    $logText.Location = [System.Drawing.Point]::new(18, 370)
     $logText.Size = [System.Drawing.Size]::new(768, 208)
     $logText.Multiline = $true
     $logText.ScrollBars = 'Vertical'
@@ -740,7 +840,7 @@ function Start-GuiMode {
     $footer = [System.Windows.Forms.Label]::new()
     $footer.Text = 'Close Outlook before running against PSTs for best results. No data is uploaded.'
     $footer.AutoSize = $true
-    $footer.Location = [System.Drawing.Point]::new(18, 552)
+    $footer.Location = [System.Drawing.Point]::new(18, 612)
     $form.Controls.Add($footer)
 
     $creditLabel = [System.Windows.Forms.Label]::new()
@@ -749,11 +849,11 @@ function Start-GuiMode {
     $creditLabel.Font = [System.Drawing.Font]::new('Segoe UI', 8)
     $creditLabel.ForeColor = [System.Drawing.Color]::DimGray
     $creditLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
-    $creditLabel.Location = [System.Drawing.Point]::new(700, 552)
+    $creditLabel.Location = [System.Drawing.Point]::new(700, 612)
     $form.Controls.Add($creditLabel)
 
-    $script:lastReportPath = $null
-    $script:lastLogPath = $null
+    $script:lastReportPaths = @()
+    $script:lastLogPaths = @()
     $appendLog = { param([string]$Text) $logText.AppendText($Text + [Environment]::NewLine) }
 
     $pstBrowse.Add_Click({
@@ -777,6 +877,8 @@ function Start-GuiMode {
             $script:autoNameOutputFromPst = $false
         }
     })
+    $teamsCheck.Add_CheckedChanged({ Update-PathsForReportSelection })
+    $emailCheck.Add_CheckedChanged({ Update-PathsForReportSelection })
     $logBrowse.Add_Click({
         $dialog = [System.Windows.Forms.SaveFileDialog]::new()
         $dialog.Filter = 'Log file (*.log)|*.log|Text file (*.txt)|*.txt|All files (*.*)|*.*'
@@ -788,8 +890,18 @@ function Start-GuiMode {
             $script:autoNameOutputFromPst = $false
         }
     })
-    $openReportButton.Add_Click({ if ($script:lastReportPath -and (Test-Path -LiteralPath $script:lastReportPath)) { Start-Process -FilePath $script:lastReportPath } })
-    $openLogButton.Add_Click({ if ($script:lastLogPath -and (Test-Path -LiteralPath $script:lastLogPath)) { Start-Process -FilePath $script:lastLogPath } })
+    $openReportButton.Add_Click({
+        foreach ($path in @($script:lastReportPaths)) {
+            if (-not ($path -and (Test-Path -LiteralPath $path))) { continue }
+            try { Start-Process -FilePath $path } catch { }
+        }
+    })
+    $openLogButton.Add_Click({
+        foreach ($path in @($script:lastLogPaths)) {
+            if (-not ($path -and (Test-Path -LiteralPath $path))) { continue }
+            try { Start-Process -FilePath $path } catch { }
+        }
+    })
 
     function Set-ConversionProgress([int]$Value, [string]$Status) {
         $progressBar.Style = 'Continuous'
@@ -817,6 +929,8 @@ function Start-GuiMode {
         $outputBrowse.Enabled = $Enabled
         $logBrowse.Enabled = $Enabled
         $keepCheck.Enabled = $Enabled
+        $teamsCheck.Enabled = $Enabled
+        $emailCheck.Enabled = $Enabled
         $pstBox.Enabled = $Enabled
         $outputBox.Enabled = $Enabled
         $logBox.Enabled = $Enabled
@@ -909,10 +1023,12 @@ function Start-GuiMode {
             # Drain any stdout lines still in flight when the child exits (race between
             # async reader and the final CONVERSION_RESULT / CONVERSION_ERROR line).
             $capturedErrorLine = $null
+            $capturedResultLine = $null
             if ($queue) {
                 $item = $null
                 while ($queue.TryDequeue([ref]$item)) {
                     if ($item -like 'CONVERSION_ERROR|*') { $capturedErrorLine = $item }
+                    if ($item -like 'CONVERSION_RESULT|*') { $capturedResultLine = $item }
                     $parsed = ConvertFrom-ProgressStdoutLine -Line $item -ExpectedRunId $script:activeRunId
                     if ($null -ne $parsed) { $latest = $parsed }
                 }
@@ -924,40 +1040,45 @@ function Start-GuiMode {
                     if ($stdoutError) { $detail = "`n`n$stdoutError" }
                     throw "Converter exited with code $($proc.ExitCode). See the log file for details.$detail"
                 }
-                $script:lastReportPath = $script:activeConversion.OutputPath
-                $script:lastLogPath = $script:activeConversion.LogPath
-                $openLogButton.Enabled = Test-Path -LiteralPath $script:lastLogPath
+                $paths = Get-ConversionPathsFromResultLine -ResultLine $capturedResultLine
+                $script:lastReportPaths = @($paths.ReportPaths)
+                $script:lastLogPaths = @($paths.LogPaths)
+                if (-not $script:lastReportPaths.Count) { $script:lastReportPaths = @($script:activeConversion.OutputPath) }
+                if (-not $script:lastLogPaths.Count) { $script:lastLogPaths = @($script:activeConversion.LogPath) }
 
-                # Exit 0 is necessary but not sufficient: if the report file is missing the run
-                # produced no output, so treat it as a failure instead of falsely reporting success.
-                if (-not ($script:lastReportPath -and (Test-Path -LiteralPath $script:lastReportPath))) {
+                $missingReports = @($script:lastReportPaths | Where-Object { -not (Test-Path -LiteralPath $_) })
+                if ($missingReports.Count -gt 0) {
                     $openReportButton.Enabled = $false
-                    throw "Converter reported success but the report file was not found: $script:lastReportPath"
+                    throw "Converter reported success but one or more report files were not found:`n$($missingReports -join "`n")"
                 }
-                $openReportButton.Enabled = $true
+                $openReportButton.Enabled = $script:lastReportPaths.Count -gt 0
+                $openLogButton.Enabled = @($script:lastLogPaths | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0
 
-                Set-ConversionProgress 100 'Conversion completed successfully. Opening report...'
+                Set-ConversionProgress 100 'Conversion completed successfully. Opening reports...'
                 & $appendLog 'Conversion completed successfully.'
                 $reportOpened = $false
-                try {
-                    Start-Process -FilePath $script:lastReportPath
-                    $reportOpened = $true
-                    & $appendLog "Opened report: $script:lastReportPath"
+                foreach ($path in @($script:lastReportPaths)) {
+                    if (-not (Test-Path -LiteralPath $path)) { continue }
+                    try {
+                        Start-Process -FilePath $path
+                        $reportOpened = $true
+                        & $appendLog "Opened report: $path"
+                    }
+                    catch {
+                        & $appendLog ("Could not open report automatically: " + $_.Exception.Message)
+                    }
                 }
-                catch {
-                    & $appendLog ("Could not open report automatically: " + $_.Exception.Message)
-                }
-                $outlookCleanup = Get-OutlookCleanupWarningFromLog -LogPath $script:lastLogPath
+                $outlookCleanup = Get-OutlookCleanupWarningFromLog -LogPath ($script:lastLogPaths | Select-Object -First 1)
                 if ($outlookCleanup) {
                     & $appendLog $outlookCleanup
                     $outlookNote = "`n`nOutlook cleanup warning:`n$outlookCleanup"
                 }
                 else { $outlookNote = '' }
                 if ($reportOpened) {
-                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReport:`n$script:lastReportPath`n`nThe report has been opened in your default browser.$outlookNote", 'Conversion complete', 'OK', 'Information') | Out-Null
+                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReports:`n$($script:lastReportPaths -join "`n")`n`nThe report(s) have been opened in your default browser.$outlookNote", 'Conversion complete', 'OK', 'Information') | Out-Null
                 }
                 else {
-                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReport:`n$script:lastReportPath`n`nThe report could not be opened automatically; open it manually.$outlookNote", 'Conversion complete', 'OK', 'Information') | Out-Null
+                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReports:`n$($script:lastReportPaths -join "`n")`n`nThe report(s) could not be opened automatically; open them manually.$outlookNote", 'Conversion complete', 'OK', 'Information') | Out-Null
                 }
             }
             catch {
@@ -998,15 +1119,21 @@ function Start-GuiMode {
             $openReportButton.Enabled = $false
             $openLogButton.Enabled = $false
 
+            if (-not $teamsCheck.Checked -and -not $emailCheck.Checked) {
+                throw 'At least one box must be checked (Teams report and/or Email report).'
+            }
             if (-not (Test-Path -LiteralPath $pstBox.Text -PathType Leaf)) { throw 'Choose an existing PST file.' }
             if ([IO.Path]::GetExtension($pstBox.Text) -ine '.pst') { throw "Selected file is not a .pst: $([IO.Path]::GetFileName($pstBox.Text))" }
             Update-OutputPathsFromPstPath
             Assert-GuiOutputPathsValid
 
-            if (Test-Path -LiteralPath $outputBox.Text -PathType Leaf) {
-                $overwriteAnswer = [System.Windows.Forms.MessageBox]::Show($form, "The report file already exists and will be overwritten:`n$($outputBox.Text)`n`nContinue?", 'Overwrite existing report?', 'YesNo', 'Warning')
+            $reportOutputPaths = Get-ReportOutputPaths -DisplayPath $outputBox.Text -TeamsReport $teamsCheck.Checked -EmailReport $emailCheck.Checked
+            $targetReportPaths = @($reportOutputPaths.DisplayPath, $reportOutputPaths.TeamsPath, $reportOutputPaths.EmailPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+            $existingReportPaths = @($targetReportPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+            if ($existingReportPaths.Count -gt 0) {
+                $overwriteAnswer = [System.Windows.Forms.MessageBox]::Show($form, "The following report file(s) already exist and will be overwritten:`n$($existingReportPaths -join "`n")`n`nContinue?", 'Overwrite existing report?', 'YesNo', 'Warning')
                 if ($overwriteAnswer -ne [System.Windows.Forms.DialogResult]::Yes) {
-                    & $appendLog 'Canceled: existing report file not overwritten.'
+                    & $appendLog 'Canceled: existing report file(s) not overwritten.'
                     Reset-ConversionProgress 'Canceled.'
                     Complete-ConversionTeardown
                     Set-ConversionControlsEnabled $true
@@ -1026,7 +1153,7 @@ function Start-GuiMode {
             Set-ConversionProgress 12 'Starting PST read...'
             $script:conversionStartedAt = Get-Date
             $script:activeRunId = [guid]::NewGuid().ToString('N')
-            $script:activeConversion = Start-EmbeddedConversionProcess -PstPath $pstBox.Text -OutputPath $outputBox.Text -LogPath $logBox.Text -DefaultConversationParticipants @() -KeepPstAttached:($keepCheck.Checked) -UseSampleData:$false -RunId $script:activeRunId
+            $script:activeConversion = Start-EmbeddedConversionProcess -PstPath $pstBox.Text -OutputPath $outputBox.Text -LogPath $logBox.Text -DefaultConversationParticipants @() -TeamsReport:$teamsCheck.Checked -EmailReport:$emailCheck.Checked -KeepPstAttached:($keepCheck.Checked) -UseSampleData:$false -RunId $script:activeRunId
             # Snapshot the normalized paths so mid-run edits to the (now-disabled) textboxes can't
             # redirect the active-run fatal-detail read, completion report, or opened log.
             $script:activeConversion | Add-Member -NotePropertyName PstPath -NotePropertyValue ([IO.Path]::GetFullPath($pstBox.Text))
