@@ -69,8 +69,13 @@ Describe 'Purview Teams PST to HTML verification suite' {
         (Test-Path -LiteralPath $teamsLogPath) | Should -BeTrue
         (Test-Path -LiteralPath $emailLogPath) | Should -BeTrue
         $result.StdOut | Should -Match 'CONVERSION_RESULT\|'
+        $result.StdOut | Should -Match 'ItemsExported=4'
+        $result.StdOut | Should -Match 'TeamsItemsExported=2'
+        $result.StdOut | Should -Match 'EmailItemsExported=2'
         $result.StdOut | Should -Match 'TeamsOutputPath=.*_Teams\.html'
         $result.StdOut | Should -Match 'EmailOutputPath=.*_Email\.html'
+        $result.StdOut | Should -Match 'TeamsLogPath=.*_Teams\.log'
+        $result.StdOut | Should -Match 'EmailLogPath=.*_Email\.log'
         $result.StdOut | Should -Match 'SubfolderScanFailures='
         (Get-Content -LiteralPath $teamsLogPath -Raw) | Should -Match 'exported=4'
         (Get-Content -LiteralPath $emailLogPath -Raw) | Should -Match 'exported=4'
@@ -82,6 +87,44 @@ Describe 'Purview Teams PST to HTML verification suite' {
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'participantMatchMode'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'conversation-toolbar'
         ([regex]::Matches((Get-Content -LiteralPath $emailReportPath -Raw), "<section class='conversation'")).Count | Should -Be 1
+    }
+
+    It 'runs the core sample path successfully with Teams only' {
+        $reportPath = Join-Path $TestDrive 'teams-only.html'
+        $logPath = Join-Path $TestDrive 'teams-only.log'
+        $teamsReportPath = Join-Path $TestDrive 'teams-only_Teams.html'
+        $teamsLogPath = Join-Path $TestDrive 'teams-only_Teams.log'
+        $result = & $script:invokePwshScriptCapture -FilePath $script:corePath -Arguments @('-UseSampleData', '-NoPrompt', '-TeamsReport:$true', '-EmailReport:$false', '-OutputPath', $reportPath, '-LogPath', $logPath)
+
+        $result.ExitCode | Should -Be 0
+        (Test-Path -LiteralPath $teamsReportPath) | Should -BeTrue
+        (Test-Path -LiteralPath $teamsLogPath) | Should -BeTrue
+        $result.StdOut | Should -Match 'CONVERSION_RESULT\|'
+        $result.StdOut | Should -Match 'ItemsExported=2'
+        $result.StdOut | Should -Match 'TeamsItemsExported=2'
+        $result.StdOut | Should -Match 'TeamsOutputPath=.*_Teams\.html'
+        $result.StdOut | Should -Match 'TeamsLogPath=.*_Teams\.log'
+        (Test-Path -LiteralPath (Join-Path $TestDrive 'teams-only_Email.html')) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $TestDrive 'teams-only_Email.log')) | Should -BeFalse
+    }
+
+    It 'runs the core sample path successfully with Email only' {
+        $reportPath = Join-Path $TestDrive 'email-only.html'
+        $logPath = Join-Path $TestDrive 'email-only.log'
+        $emailReportPath = Join-Path $TestDrive 'email-only_Email.html'
+        $emailLogPath = Join-Path $TestDrive 'email-only_Email.log'
+        $result = & $script:invokePwshScriptCapture -FilePath $script:corePath -Arguments @('-UseSampleData', '-NoPrompt', '-TeamsReport:$false', '-EmailReport:$true', '-OutputPath', $reportPath, '-LogPath', $logPath)
+
+        $result.ExitCode | Should -Be 0
+        (Test-Path -LiteralPath $emailReportPath) | Should -BeTrue
+        (Test-Path -LiteralPath $emailLogPath) | Should -BeTrue
+        $result.StdOut | Should -Match 'CONVERSION_RESULT\|'
+        $result.StdOut | Should -Match 'ItemsExported=2'
+        $result.StdOut | Should -Match 'EmailItemsExported=2'
+        $result.StdOut | Should -Match 'EmailOutputPath=.*_Email\.html'
+        $result.StdOut | Should -Match 'EmailLogPath=.*_Email\.log'
+        (Test-Path -LiteralPath (Join-Path $TestDrive 'email-only_Teams.html')) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $TestDrive 'email-only_Teams.log')) | Should -BeFalse
     }
 
     It 'runs the launcher sample path successfully' {
@@ -100,11 +143,23 @@ Describe 'Purview Teams PST to HTML verification suite' {
         (Test-Path -LiteralPath $teamsLogPath) | Should -BeTrue
         (Test-Path -LiteralPath $emailLogPath) | Should -BeTrue
         $result.StdOut | Should -Match 'CONVERSION_RESULT\|'
+        $result.StdOut | Should -Match 'ItemsExported=4'
+        $result.StdOut | Should -Match 'TeamsItemsExported=2'
+        $result.StdOut | Should -Match 'EmailItemsExported=2'
         $result.StdOut | Should -Match 'SubfolderScanFailures='
         (Get-Content -LiteralPath $teamsLogPath -Raw) | Should -Match 'exported=4'
         (Get-Content -LiteralPath $emailLogPath -Raw) | Should -Match 'exported=4'
         (Get-Content -LiteralPath $teamsLogPath -Raw) | Should -Match 'itemReadFailures=0'
         (Get-Content -LiteralPath $emailLogPath -Raw) | Should -Match 'itemReadFailures=0'
+    }
+
+    It 'rejects both report flags false' {
+        $reportPath = Join-Path $TestDrive 'both-false.html'
+        $logPath = Join-Path $TestDrive 'both-false.log'
+        $result = & $script:invokePwshScriptCapture -FilePath $script:corePath -Arguments @('-UseSampleData', '-NoPrompt', '-TeamsReport:$false', '-EmailReport:$false', '-OutputPath', $reportPath, '-LogPath', $logPath)
+
+        $result.ExitCode | Should -Not -Be 0
+        $result.StdOut | Should -Match 'CONVERSION_ERROR'
     }
 
     It 'passes the permanent stop-process-tree regression script' {
@@ -136,12 +191,12 @@ Describe 'Purview Teams PST to HTML verification suite' {
     }
 
     It 'builds debug and release executables' {
-        $version = '1.0.29.1'
+        $version = '1.0.32.0'
         $result = & $script:invokePwshScriptCapture -FilePath $script:buildScriptPath -Arguments @('-Version', $version)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter_Debug.exe')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter.exe')) | Should -BeTrue
-        $result.StdOut | Should -Match 'built 1.0.29.1'
+        $result.StdOut | Should -Match 'built 1.0.32.0'
     }
 }

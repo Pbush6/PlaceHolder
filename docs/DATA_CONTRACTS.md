@@ -1,6 +1,6 @@
 # Purview Teams PST → HTML — Data Contracts
 
-**Version:** 1.0.30.0-hardening  
+**Version:** 1.0.32.0  
 **Last updated:** 2026-07-08
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
@@ -13,7 +13,7 @@ All lines are single-line, pipe-separated `Key=Value` fields. Optional `RunId=<3
 |--------|--------------|-----------------|
 | `CONVERSION_PROGRESS` | During PST scan | `ItemsAttempted`, `ItemsExported`, `FoldersScanned`, `ItemReadFailures`, `ElapsedSeconds`, `RatePerMinute`, `FolderPath` |
 | `CONVERSION_STAGE` | Report lifecycle | `Stage` (+ optional `Written`, `Total` for `WritingReport`) |
-| `CONVERSION_RESULT` | Success only | `OutputPath`, `LogPath`, `ItemsExported`, `ItemReadFailures`, `AttachmentReadFailures`, `SubfolderScanFailures` |
+| `CONVERSION_RESULT` | Success only | `OutputPath`, `LogPath`, `ItemsExported`, `ItemReadFailures`, `AttachmentReadFailures`, `SubfolderScanFailures` + optional `TeamsOutputPath`, `EmailOutputPath`, `TeamsLogPath`, `EmailLogPath`, `TeamsItemsExported`, `EmailItemsExported` |
 | `CONVERSION_ERROR` | Fatal failure (before throw) | `ExitCode`, `Message` (max 500 chars, no CR/LF/pipes) |
 
 **Schema:** `docs/schemas/stdout-contract.schema.json`
@@ -28,7 +28,7 @@ Format: `yyyy-MM-ddTHH:mm:ss [INFO|WARN|ERROR] message`
 - UTF-8 without BOM
 - Truncated fresh each run
 
-Summary line includes: `subfolderScanFailures` counter.
+Summary line includes: `subfolderScanFailures` counter. When both reports are enabled, the result line also carries the per-report paths and item counts for Teams and Email.
 
 ## 3. In-memory message record (core internal)
 

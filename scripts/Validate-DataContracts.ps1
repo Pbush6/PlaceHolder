@@ -62,8 +62,16 @@ try {
 
     $result = ($lines | Where-Object { $_ -like 'CONVERSION_RESULT|*' } | Select-Object -Last 1)
     Test-StdoutLineShape -Line $result -ExpectedPrefix 'CONVERSION_RESULT' -RequiredFields @(
-        'OutputPath', 'LogPath', 'ItemsExported', 'ItemReadFailures', 'AttachmentReadFailures', 'SubfolderScanFailures'
+        'OutputPath', 'LogPath', 'ItemsExported', 'ItemReadFailures', 'AttachmentReadFailures', 'SubfolderScanFailures',
+        'TeamsOutputPath', 'EmailOutputPath', 'TeamsLogPath', 'EmailLogPath', 'TeamsItemsExported', 'EmailItemsExported'
     )
+    if ($result -notmatch 'ItemsExported=4') { throw 'CONVERSION_RESULT missing expected ItemsExported=4' }
+    if ($result -notmatch 'TeamsItemsExported=2') { throw 'CONVERSION_RESULT missing expected TeamsItemsExported=2' }
+    if ($result -notmatch 'EmailItemsExported=2') { throw 'CONVERSION_RESULT missing expected EmailItemsExported=2' }
+    if ($result -notmatch 'TeamsOutputPath=.*_Teams\.html') { throw 'CONVERSION_RESULT missing expected TeamsOutputPath' }
+    if ($result -notmatch 'EmailOutputPath=.*_Email\.html') { throw 'CONVERSION_RESULT missing expected EmailOutputPath' }
+    if ($result -notmatch 'TeamsLogPath=.*_Teams\.log') { throw 'CONVERSION_RESULT missing expected TeamsLogPath' }
+    if ($result -notmatch 'EmailLogPath=.*_Email\.log') { throw 'CONVERSION_RESULT missing expected EmailLogPath' }
 
     $progress = ($lines | Where-Object { $_ -like 'CONVERSION_PROGRESS|*' } | Select-Object -First 1)
     if ($progress) {

@@ -14,7 +14,7 @@ corrupted the embed line).
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '1.0.28.0'
+    [string]$Version = '1.0.32.0'
 )
 
 Set-StrictMode -Version Latest
@@ -31,6 +31,22 @@ $releaseOut = Join-Path $buildDir 'PurviewTeamsPstToHtmlConverter.exe'
 foreach ($f in @($core, $launcher, $icon)) {
     if (-not (Test-Path -LiteralPath $f)) { throw "Required file missing: $f" }
 }
+
+function Assert-SourceContains {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Snippet,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    $text = [IO.File]::ReadAllText($Path)
+    if ($text -notmatch [regex]::Escape($Snippet)) {
+        throw "Re-sync required before build: $Label missing from $Path."
+    }
+}
+
+Assert-SourceContains -Path $core -Snippet 'function Get-ReportOutputPaths' -Label 'core helper Get-ReportOutputPaths'
+Assert-SourceContains -Path $core -Snippet 'function Get-ItemReportBucket' -Label 'core helper Get-ItemReportBucket'
+Assert-SourceContains -Path $launcher -Snippet 'function Get-ReportOutputPaths' -Label 'launcher helper Get-ReportOutputPaths'
 [void][IO.Directory]::CreateDirectory($buildDir)
 
 # --- Embed core ---

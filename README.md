@@ -2,12 +2,14 @@
 
 Converts a Microsoft Purview eDiscovery Teams PST export into a searchable, filterable HTML conversation report on Windows.
 
-**Current version:** 1.0.29.0  
+**Current version:** 1.0.32.0  
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
 
-- Temporarily attaches a PST via Outlook COM, reads Teams message items, and writes one HTML report.
+- Temporarily attaches a PST via Outlook COM, reads message items, and writes one or two HTML reports.
+- Exports Teams items from `TeamsMessagesData`, `TeamsMeetings`, `Migrated-Teams-Chat`, or `SubstrateHolds`.
+- Exports Email items when that report is enabled using the message-class classifier (`IPM.Note*`, excluding meeting classes).
 - GUI launcher (`PurviewTeamsPstToHtmlConverter.exe`) with progress, cancel, and automatic report open.
 - Core converter (`Convert-PurviewTeamsPstToHtml.ps1`) runs under PowerShell 7 (`pwsh -Sta`).
 - After conversion, verifies the PST was detached from Outlook (unless **Keep PST attached** is checked).
@@ -63,7 +65,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.29.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.32.0
 ```
 
 Outputs:
@@ -82,7 +84,14 @@ pwsh -NoProfile -File .\src\Start-PurviewTeamsPstToHtmlApp.ps1 -NoGui -UseSample
   -OutputPath $env:TEMP\sample.html -LogPath $env:TEMP\sample.log
 ```
 
-Expect `exported=3`, `itemReadFailures=0`, exit code 0.
+Expect `ItemsExported=4`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `itemReadFailures=0`, exit code 0.
+
+## Dual report behavior
+
+- The GUI checkboxes map to `-TeamsReport:$true|$false` and `-EmailReport:$true|$false`.
+- When both are checked, the shared display path is split into `_Teams` and `_Email` siblings for both report and log files.
+- When only one is checked, only that report and log file are written.
+- If both are unchecked, the core exits with `CONVERSION_ERROR`.
 
 ## Related paths
 
@@ -91,6 +100,13 @@ Expect `exported=3`, `itemReadFailures=0`, exit code 0.
 | Working copy (source) | `...\Cursor Working Directory\PurviewTeamsPstToHtmlApp` |
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
+
+## Recent changes (2026-07-09)
+
+- Teams folder filter expanded: also includes `TeamsMeetings`, `Migrated-Teams-Chat`, and `SubstrateHolds`.
+- Dual-report contract now includes explicit Teams/Email output paths and item counts.
+- Sample-data smoke now expects `ItemsExported=4` with `TeamsItemsExported=2` and `EmailItemsExported=2`.
+- Build now fails fast if the shared helper names drift out of sync.
 
 ## Recent changes (2026-07-08)
 

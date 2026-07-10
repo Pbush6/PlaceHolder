@@ -32,4 +32,7 @@ Then copy EXEs from `build\` to the Cursor Output folder above.
 
 - Prefer in-memory PST read path (T13 disk-spill was reverted for speed).
 - Detach only PSTs this run attached; leave pre-existing attachments alone.
-- Sample-data smoke: `-NoGui -UseSampleData`, expect `exported=3`.
+- Sample-data smoke: `-NoGui -UseSampleData`, expect `ItemsExported=4`, `TeamsItemsExported=2`, `EmailItemsExported=2`.
+- GUI/CLI bools are forwarded as `-TeamsReport:$true|$false` and `-EmailReport:$true|$false`; both false must fail with `CONVERSION_ERROR`.
+- `build.ps1` now re-sync checks `Get-ReportOutputPaths` and `Get-ItemReportBucket` before embedding.
+- Export filter: folders whose path contains `TeamsMessagesData`, `TeamsMeetings`, `Migrated-Teams-Chat`, or `SubstrateHolds`.
