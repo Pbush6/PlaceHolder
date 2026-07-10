@@ -70,6 +70,8 @@ $script:Stats = [ordered]@{
     ItemsAttempted          = 0
     ItemsExported           = 0
     ItemsSkipped            = 0
+    TeamsItemsExported      = 0
+    EmailItemsExported      = 0
     ItemReadFailures        = 0
     AttachmentReadFailures  = 0
     SubfolderScanFailures   = 0
@@ -78,6 +80,7 @@ $script:Stats = [ordered]@{
 # Single no-BOM, auto-flushing writer over the log file. Opened in Invoke-ReportConversion
 # (create/truncate = fresh log each run) and disposed in its finally block.
 $script:LogWriter = $null
+$script:LogWriters = @()
 
 function ConvertTo-NormalizedInputPath {
     param([AllowNull()][string]$Path)
@@ -197,7 +200,9 @@ function Write-ReportLog {
     # extra log lines or break the single-line stdout parser downstream.
     $safeMessage = ([string]$Message) -replace "[\r\n]+", ' '
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 's'), $Level, $safeMessage
-    if ($null -ne $script:LogWriter) { $script:LogWriter.WriteLine($line) }
+    foreach ($writer in @($script:LogWriters)) {
+        if ($null -ne $writer) { $writer.WriteLine($line) }
+    }
     Write-Information $line -InformationAction Continue
 }
 
@@ -464,6 +469,51 @@ function Test-MissingDate {
     return $false
 }
 
+# ponytail: keep in sync with ReportPathNaming.ps1
+function Get-ReportPathBaseName {
+    param([Parameter(Mandatory = $true)][string]$FilePath)
+    $dir = [IO.Path]::GetDirectoryName($FilePath)
+    $name = [IO.Path]::GetFileNameWithoutExtension($FilePath)
+    $ext = [IO.Path]::GetExtension($FilePath)
+    if ($name -match '(?i)_Teams$') { $name = $name.Substring(0, $name.Length - 6) }
+    elseif ($name -match '(?i)_Email$') { $name = $name.Substring(0, $name.Length - 6) }
+    return $name
+}
+
+# ponytail: keep in sync with ReportPathNaming.ps1
+function Get-ReportOutputPaths {
+    param(
+        [Parameter(Mandatory = $true)][string]$DisplayPath,
+        [Parameter(Mandatory = $true)][bool]$TeamsReport,
+        [Parameter(Mandatory = $true)][bool]$EmailReport
+    )
+    if (-not $TeamsReport -and -not $EmailReport) {
+        throw 'At least one of TeamsReport or EmailReport must be true.'
+    }
+    $dir = [IO.Path]::GetDirectoryName($DisplayPath)
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
+    $ext = [IO.Path]::GetExtension($DisplayPath)
+    if ([string]::IsNullOrWhiteSpace($ext)) { $ext = '.html' }
+    $base = Get-ReportPathBaseName -FilePath $DisplayPath
+    $teamsPath = $null
+    $emailPath = $null
+    $display = $null
+    if ($TeamsReport -and $EmailReport) {
+        $display = Join-Path $dir ($base + $ext)
+        $teamsPath = Join-Path $dir ($base + '_Teams' + $ext)
+        $emailPath = Join-Path $dir ($base + '_Email' + $ext)
+    }
+    elseif ($TeamsReport) {
+        $display = Join-Path $dir ($base + '_Teams' + $ext)
+        $teamsPath = $display
+    }
+    else {
+        $display = Join-Path $dir ($base + '_Email' + $ext)
+        $emailPath = $display
+    }
+    [pscustomobject]@{ DisplayPath = $display; TeamsPath = $teamsPath; EmailPath = $emailPath }
+}
+
 # ponytail: keep in sync with ReportClassification.ps1
 function Test-IsTeamsMessagesFolder {
     param([Parameter(Mandatory = $true)][string]$FolderPath)
@@ -546,11 +596,13 @@ function Read-OutlookFolder {
     param(
         [Parameter(Mandatory = $true)] [object]$Folder,
         [Parameter(Mandatory = $true)] [string]$FolderPath,
-        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$Records
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$TeamsRecords,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$EmailRecords
     )
 
     $script:Stats.FoldersScanned++
     Write-ReportLog "Scanning folder: $FolderPath"
+    $loggedNonReportSkip = $false
     $items = $null
     try {
         $items = $Folder.Items
@@ -568,20 +620,37 @@ function Read-OutlookFolder {
                 $messageClass = Get-PropSafe -Object $item -Name 'MessageClass' -Default ''
                 $body = Get-PropSafe -Object $item -Name 'Body' -Default $null
                 $subject = Get-PropSafe -Object $item -Name 'Subject' -Default $null
+                $isMessageLike = ($messageClass -or $body -or $subject)
 
                 # Purview Teams messages are usually mail-like items in an Exchange PST. Export any
                 # item that has normal message properties instead of requiring one exact MessageClass.
-                if ($messageClass -or $body -or $subject) {
-                    [void]$Records.Add((Get-MessageRecord -Item $item -FolderPath $FolderPath))
-                    $script:Stats.ItemsExported++
+                if ($isMessageLike) {
+                    $bucket = Get-ItemReportBucket -FolderPath $FolderPath -MessageClass $messageClass
+                    if ($bucket -eq 'Teams' -and $TeamsReport) {
+                        [void]$TeamsRecords.Add((Get-MessageRecord -Item $item -FolderPath $FolderPath))
+                        $script:Stats.TeamsItemsExported++
+                        $script:Stats.ItemsExported++
+                    }
+                    elseif ($bucket -eq 'Email' -and $EmailReport) {
+                        [void]$EmailRecords.Add((Get-MessageRecord -Item $item -FolderPath $FolderPath))
+                        $script:Stats.EmailItemsExported++
+                        $script:Stats.ItemsExported++
+                    }
+                    else {
+                        if (-not $loggedNonReportSkip -and $bucket -eq 'Skip') {
+                            Write-ReportLog "Skipping non-report item in folder: $FolderPath (class=$messageClass)"
+                            $loggedNonReportSkip = $true
+                        }
+                        $script:Stats.ItemsSkipped++
+                    }
                 }
                 else {
                     $script:Stats.ItemsSkipped++
                 }
 
-                if ($Records.Count -gt 0 -and $Records.Count % $LogEvery -eq 0) {
+                if ($script:Stats.ItemsExported -gt 0 -and $script:Stats.ItemsExported % $LogEvery -eq 0) {
                     Write-ConversionProgress -FolderPath $FolderPath
-                    Write-ReportLog "Collected $($Records.Count) message-like items so far."
+                    Write-ReportLog "Collected $($script:Stats.ItemsExported) message-like items so far."
                 }
             }
             catch {
@@ -606,7 +675,7 @@ function Read-OutlookFolder {
             try {
                 $child = $subFolders.Item($j)
                 $childName = Get-PropSafe -Object $child -Name 'Name' -Default "Folder$j"
-                Read-OutlookFolder -Folder $child -FolderPath "$FolderPath\$childName" -Records $Records
+                Read-OutlookFolder -Folder $child -FolderPath "$FolderPath\$childName" -TeamsRecords $TeamsRecords -EmailRecords $EmailRecords
             }
             catch {
                 $script:Stats.SubfolderScanFailures++
@@ -1235,14 +1304,16 @@ $script
 }
 
 function Get-SampleRecord {
-    $script:Stats.FoldersScanned = 1
-    $script:Stats.ItemsAttempted = 3
-    $script:Stats.ItemsExported = 3
-    return @(
-        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:00:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:00:00'; ReceivedTime = [datetime]'2024-01-01T09:00:05'; CreationTime = [datetime]'2024-01-01T09:00:05'; EntryId = 'sample-entry-1'; BodyText = 'Hello Linda. This sample validates HTML encoding: <script>alert(1)</script>'; AttachmentsHtml = '' }
-        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:01:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:01:00'; ReceivedTime = [datetime]'2024-01-01T09:01:05'; CreationTime = [datetime]'2024-01-01T09:01:05'; EntryId = 'sample-entry-2'; BodyText = "Thanks.`nThis message has two lines."; AttachmentsHtml = "<div class='attachments'><strong>Attachments:</strong><table><tbody><tr><td>sample.pdf</td><td>sample.pdf</td><td>1234</td></tr></tbody></table></div>" }
-        [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Other'; Subject = 'Fireflies note'; MessageClass = 'IPM.Note'; SenderName = 'Fireflies.ai Notetaker'; SenderEmail = 'bot@example.com'; SenderDisplay = 'Fireflies.ai Notetaker'; To = 'Torey Page'; Cc = ''; Participants = @('Fireflies.ai Notetaker','Torey Page'); ParticipantsKey = 'Fireflies.ai Notetaker || Torey Page'; ConversationKey = "Fireflies.ai Notetaker || Torey Page`nFireflies note`nSamplePst\Other"; ConversationTitle = 'Fireflies note'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Fireflies should appear in Other detected names / IDs.'; AttachmentsHtml = '' }
-    )
+    return [pscustomobject]@{
+        Teams = @(
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:00:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:00:00'; ReceivedTime = [datetime]'2024-01-01T09:00:05'; CreationTime = [datetime]'2024-01-01T09:00:05'; EntryId = 'sample-entry-1'; BodyText = 'Hello Linda. This sample validates HTML encoding: <script>alert(1)</script>'; AttachmentsHtml = '' }
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:01:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:01:00'; ReceivedTime = [datetime]'2024-01-01T09:01:05'; CreationTime = [datetime]'2024-01-01T09:01:05'; EntryId = 'sample-entry-2'; BodyText = "Thanks.`nThis message has two lines."; AttachmentsHtml = "<div class='attachments'><strong>Attachments:</strong><table><tbody><tr><td>sample.pdf</td><td>sample.pdf</td><td>1234</td></tr></tbody></table></div>" }
+        )
+        Email = @(
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Budget'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nBudget`nSamplePst\Inbox"; ConversationTitle = 'Budget'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Budget attached.'; AttachmentsHtml = '' }
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:05:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Re: Budget'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nBudget`nSamplePst\Inbox"; ConversationTitle = 'Budget'; SentOn = [datetime]'2024-01-01T10:05:00'; ReceivedTime = [datetime]'2024-01-01T10:05:05'; CreationTime = [datetime]'2024-01-01T10:05:05'; EntryId = 'sample-entry-4'; BodyText = 'Thanks, I will review it.'; AttachmentsHtml = '' }
+        )
+    }
 }
 
 function Write-HtmlReport {
@@ -1308,6 +1379,48 @@ function Write-HtmlReport {
     }
 }
 
+# Task 4 will replace with full email UX.
+function Write-EmailHtmlReport {
+    param(
+        [Parameter(Mandatory = $true)][object]$Records,
+        [Parameter(Mandatory = $true)]$PstItem,
+        [Parameter(Mandatory = $true)][string]$ReportPath
+    )
+
+    Write-ReportLog 'Preparing Email HTML report data.'
+    Write-ConversionStage -Stage 'PreparingReport'
+    $sorted = @($Records | Sort-Object @{ Expression = { if ($_.SortTime) { ([datetime]$_.SortTime).Ticks } else { 0 } } }, ParticipantsKey, Subject, FolderPath)
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
+    try {
+        $writer.WriteLine(@"
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Purview Email PST Report - $(ConvertTo-HtmlEncodedText $PstItem.Name)</title>
+<style>
+body { font-family: "Segoe UI", Arial, sans-serif; margin: 24px; color: #1f2937; }
+.card { max-width: 900px; margin: 0 auto; padding: 20px; border: 1px solid #d9e0ea; border-radius: 14px; background: #fff; }
+.muted { color: #5b6472; }
+</style>
+</head>
+<body>
+  <div class='card'>
+    <h1>Purview Email PST Report</h1>
+    <p class='muted'>PST: $(ConvertTo-HtmlEncodedText $PstItem.Name)</p>
+    <p>Message count: $(ConvertTo-HtmlEncodedText $sorted.Count)</p>
+  </div>
+</body>
+</html>
+"@)
+    }
+    finally {
+        $writer.Dispose()
+    }
+}
+
 function Invoke-ReportConversion {
     if (-not $TeamsReport -and -not $EmailReport) {
         $msg = 'At least one report type must be selected (TeamsReport and/or EmailReport).'
@@ -1334,19 +1447,22 @@ function Invoke-ReportConversion {
     }
 
     $baseName = [IO.Path]::GetFileNameWithoutExtension($pstItem.Name) -replace '[^a-zA-Z0-9._-]', '_'
-    $script:OutputPath = Resolve-OutputFilePath -Path $OutputPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.html"
-    $script:LogPath = Resolve-OutputFilePath -Path $LogPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.log"
+    $displayHtmlPath = Resolve-OutputFilePath -Path $OutputPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.html"
+    $displayLogPath = Resolve-OutputFilePath -Path $LogPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.log"
+    $htmlPaths = Get-ReportOutputPaths -DisplayPath $displayHtmlPath -TeamsReport $TeamsReport -EmailReport $EmailReport
+    $logPaths = Get-ReportOutputPaths -DisplayPath $displayLogPath -TeamsReport $TeamsReport -EmailReport $EmailReport
 
-    if ([IO.Path]::GetExtension($script:OutputPath) -notin @('.html','.htm')) {
-        Write-Warning "OutputPath does not end in .html or .htm: $script:OutputPath"
-    }
-    if ([IO.Path]::GetExtension($script:LogPath) -notin @('.log','.txt')) {
-        Write-Warning "LogPath does not end in .log or .txt: $script:LogPath"
-    }
+    $script:TeamsOutputPath = $htmlPaths.TeamsPath
+    $script:EmailOutputPath = $htmlPaths.EmailPath
+    $script:TeamsLogPath = $logPaths.TeamsPath
+    $script:EmailLogPath = $logPaths.EmailPath
+    $script:OutputPath = if ($TeamsReport) { $script:TeamsOutputPath } else { $script:EmailOutputPath }
+    $script:LogPath = if ($TeamsReport) { $script:TeamsLogPath } else { $script:EmailLogPath }
 
-    Assert-OutputPathsSafe -ReportPath $script:OutputPath -LogPath $script:LogPath
+    if ($script:TeamsOutputPath) { Assert-OutputPathsSafe -ReportPath $script:TeamsOutputPath -LogPath $script:TeamsLogPath }
+    if ($script:EmailOutputPath) { Assert-OutputPathsSafe -ReportPath $script:EmailOutputPath -LogPath $script:EmailLogPath }
 
-    foreach ($pathToPrepare in @($script:OutputPath, $script:LogPath)) {
+    foreach ($pathToPrepare in @($script:TeamsOutputPath, $script:EmailOutputPath, $script:TeamsLogPath, $script:EmailLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
         $outDir = Split-Path -LiteralPath $pathToPrepare
         if ([string]::IsNullOrWhiteSpace($outDir)) { $outDir = $downloads }
         # New-Item has no -LiteralPath, and -Path treats [ ] as wildcards; use the .NET API so a
@@ -1358,8 +1474,13 @@ function Invoke-ReportConversion {
     # from a previous run and shows cleanup/complete progress too early. Create/truncate mode
     # clears the file; UTF8Encoding($false) writes no BOM so the GUI log-tail parser reads the
     # first token cleanly; AutoFlush keeps lines visible to the live tail immediately.
-    $script:LogWriter = [System.IO.StreamWriter]::new($script:LogPath, $false, [System.Text.UTF8Encoding]::new($false))
-    $script:LogWriter.AutoFlush = $true
+    $script:LogWriters = @()
+    foreach ($logPath in @($script:TeamsLogPath, $script:EmailLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
+        $writer = [System.IO.StreamWriter]::new($logPath, $false, [System.Text.UTF8Encoding]::new($false))
+        $writer.AutoFlush = $true
+        $script:LogWriters += $writer
+    }
+    $script:LogWriter = if ($script:LogWriters.Count -gt 0) { $script:LogWriters[0] } else { $null }
 
     if ($KeepPstAttached) {
         Write-Warning 'KeepPstAttached was specified. The PST will remain attached to the current Outlook profile unless you remove it manually.'
@@ -1368,7 +1489,8 @@ function Invoke-ReportConversion {
     $outlook = $null
     $namespace = $null
     $root = $null
-    $records = New-Object System.Collections.Generic.List[object]
+    $teamsRecords = New-Object System.Collections.Generic.List[object]
+    $emailRecords = New-Object System.Collections.Generic.List[object]
     $weAttached = $false
 
     try {
@@ -1376,7 +1498,31 @@ function Invoke-ReportConversion {
         Write-ReportLog "PST size bytes: $($pstItem.Length)"
 
         if ($UseSampleData) {
-            foreach ($record in (Get-SampleRecord)) { [void]$records.Add($record) }
+            $sample = Get-SampleRecord
+            $sampleTeams = @($sample.Teams)
+            $sampleEmail = @($sample.Email)
+            $script:Stats.FoldersScanned = 2
+            $script:Stats.ItemsAttempted = $sampleTeams.Count + $sampleEmail.Count
+            foreach ($record in $sampleTeams) {
+                if ($TeamsReport) {
+                    [void]$teamsRecords.Add($record)
+                    $script:Stats.TeamsItemsExported++
+                    $script:Stats.ItemsExported++
+                }
+                else {
+                    $script:Stats.ItemsSkipped++
+                }
+            }
+            foreach ($record in $sampleEmail) {
+                if ($EmailReport) {
+                    [void]$emailRecords.Add($record)
+                    $script:Stats.EmailItemsExported++
+                    $script:Stats.ItemsExported++
+                }
+                else {
+                    $script:Stats.ItemsSkipped++
+                }
+            }
         }
         else {
             $outlook = Invoke-OutlookComOperation -Operation 'starting Outlook COM automation' -ScriptBlock { New-Object -ComObject Outlook.Application }
@@ -1398,15 +1544,23 @@ function Invoke-ReportConversion {
             }
 
             $rootName = Get-PropSafe -Object $root -Name 'Name' -Default $pstItem.BaseName
-            Read-OutlookFolder -Folder $root -FolderPath $rootName -Records $records
+            Read-OutlookFolder -Folder $root -FolderPath $rootName -TeamsRecords $teamsRecords -EmailRecords $emailRecords
         }
 
-        Write-ReportLog "Finished reading PST. Message-like items collected: $($records.Count)"
+        Write-ReportLog "Finished reading PST. Teams items: $($teamsRecords.Count); Email items: $($emailRecords.Count)"
         Write-ConversionStage -Stage 'FinishedReading'
-        Write-HtmlReport -Records $records.ToArray() -PstItem $pstItem -ReportPath $script:OutputPath
-        Write-ReportLog "HTML report written to $script:OutputPath"
+        if ($TeamsReport) {
+            Write-ReportLog 'Writing Teams HTML report.'
+            Write-HtmlReport -Records $teamsRecords.ToArray() -PstItem $pstItem -ReportPath $script:TeamsOutputPath
+            Write-ReportLog "HTML report written to $script:TeamsOutputPath"
+        }
+        if ($EmailReport) {
+            Write-ReportLog 'Writing Email HTML report.'
+            Write-EmailHtmlReport -Records $emailRecords.ToArray() -PstItem $pstItem -ReportPath $script:EmailOutputPath
+            Write-ReportLog "HTML report written to $script:EmailOutputPath"
+        }
         Write-ConversionStage -Stage 'ReportWritten'
-        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures)
+        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}|TeamsOutputPath={7}|EmailOutputPath={8}|TeamsLogPath={9}|EmailLogPath={10}|TeamsItemsExported={11}|EmailItemsExported={12}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $script:TeamsOutputPath, $script:EmailOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:Stats.TeamsItemsExported, $script:Stats.EmailItemsExported)
     }
     catch {
         $fatalMessage = if ($_.Exception.Message) { $_.Exception.Message } else { [string]$_.Exception }
@@ -1438,10 +1592,11 @@ function Invoke-ReportConversion {
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
 
-        if ($null -ne $script:LogWriter) {
-            $script:LogWriter.Dispose()
-            $script:LogWriter = $null
+        foreach ($writer in @($script:LogWriters)) {
+            if ($null -ne $writer) { $writer.Dispose() }
         }
+        $script:LogWriters = @()
+        $script:LogWriter = $null
     }
 }
 
