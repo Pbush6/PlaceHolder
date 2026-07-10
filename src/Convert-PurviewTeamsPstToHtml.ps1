@@ -743,9 +743,17 @@ function Test-PstStoreAttached {
         [Parameter(Mandatory = $true)] [string]$TargetPath
     )
 
-    $root = Find-StoreRootForPst -Namespace $Namespace -TargetPath $TargetPath
-    if ($null -ne $root) { Close-ComObjectSafe $root; return $true }
-    return $false
+    # Outlook may already be dead (RPC server unavailable). Never throw from here —
+    # a throw in the conversion finally-block would flip a successful report write to exit 1.
+    try {
+        $root = Find-StoreRootForPst -Namespace $Namespace -TargetPath $TargetPath
+        if ($null -ne $root) { Close-ComObjectSafe $root; return $true }
+        return $false
+    }
+    catch {
+        Write-ReportLog "Could not verify whether PST is still attached. $($_.Exception.Message)" 'WARN'
+        return $true
+    }
 }
 
 function Remove-PstStoreFromOutlook {
@@ -1967,28 +1975,41 @@ function Invoke-ReportConversion {
         throw
     }
     finally {
-        if ($weAttached -and -not $KeepPstAttached -and $null -ne $namespace) {
-            Write-ReportLog 'Detaching PST from Outlook profile.'
-            Write-ConversionStage -Stage 'Detaching'
-            try {
-                [void](Confirm-OutlookPstCleanup -Namespace $namespace -TargetPath $pstItem.FullName -RootFolder $root)
-            }
-            catch {
-                Write-ReportLog "Could not detach PST automatically. $($_.Exception.Message)" 'WARN'
-                if (Test-PstStoreAttached -Namespace $namespace -TargetPath $pstItem.FullName) {
-                    Write-ReportLog "PST is still attached to your Outlook profile: $($pstItem.FullName). Remove it manually in Outlook (File -> Account Settings -> Data Files), then verify your profile is unchanged." 'WARN'
+        # Detach/COM cleanup must never abort a successful conversion. Outlook can die mid-scan
+        # (0x800706BA); reports may already be written and CONVERSION_RESULT already emitted.
+        try {
+            if ($weAttached -and -not $KeepPstAttached -and $null -ne $namespace) {
+                Write-ReportLog 'Detaching PST from Outlook profile.'
+                Write-ConversionStage -Stage 'Detaching'
+                try {
+                    [void](Confirm-OutlookPstCleanup -Namespace $namespace -TargetPath $pstItem.FullName -RootFolder $root)
+                }
+                catch {
+                    Write-ReportLog "Could not detach PST automatically. $($_.Exception.Message)" 'WARN'
+                    if (Test-PstStoreAttached -Namespace $namespace -TargetPath $pstItem.FullName) {
+                        Write-ReportLog "PST is still attached to your Outlook profile: $($pstItem.FullName). Remove it manually in Outlook (File -> Account Settings -> Data Files), then verify your profile is unchanged." 'WARN'
+                    }
                 }
             }
         }
+        catch {
+            Write-ReportLog "PST detach cleanup failed unexpectedly. $($_.Exception.Message)" 'WARN'
+        }
 
-        $elapsed = (Get-Date) - $script:Stats.StartedAt
-        Write-ReportLog ('Summary: folders={0}; attempted={1}; exported={2}; skipped={3}; itemReadFailures={4}; attachmentReadFailures={5}; subfolderScanFailures={6}; elapsed={7}' -f $script:Stats.FoldersScanned, $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.ItemsSkipped, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $elapsed)
+        try {
+            $elapsed = (Get-Date) - $script:Stats.StartedAt
+            Write-ReportLog ('Summary: folders={0}; attempted={1}; exported={2}; skipped={3}; itemReadFailures={4}; attachmentReadFailures={5}; subfolderScanFailures={6}; elapsed={7}' -f $script:Stats.FoldersScanned, $script:Stats.ItemsAttempted, $script:Stats.ItemsExported, $script:Stats.ItemsSkipped, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $elapsed)
+        }
+        catch { }
 
-        Close-ComObjectSafe $root
-        Close-ComObjectSafe $namespace
-        Close-ComObjectSafe $outlook
-        [GC]::Collect()
-        [GC]::WaitForPendingFinalizers()
+        try {
+            Close-ComObjectSafe $root
+            Close-ComObjectSafe $namespace
+            Close-ComObjectSafe $outlook
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+        }
+        catch { }
 
         foreach ($writer in @($script:LogWriters)) {
             if ($null -ne $writer) { $writer.Dispose() }

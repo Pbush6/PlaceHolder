@@ -201,13 +201,20 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $launcherText | Should -Match '(?s)while \(\$queue\.TryDequeue\(\[ref\]\$item\)\).*CONVERSION_RESULT\|.*ConvertFrom-ProgressStdoutLine'
     }
 
+    It 'detach finally-block never lets COM verify-throw abort a successful conversion' {
+        $coreText = Get-Content -LiteralPath $script:corePath -Raw
+        $coreText | Should -Match '(?s)function Test-PstStoreAttached \{.*?catch \{.*?return \$true'
+        $coreText | Should -Match 'PST detach cleanup failed unexpectedly'
+        $coreText | Should -Match '(?s)finally \{.*?PST detach cleanup failed unexpectedly.*?Summary: folders='
+    }
+
     It 'builds debug and release executables' {
-        $version = '1.0.32.1'
+        $version = '1.0.32.2'
         $result = & $script:invokePwshScriptCapture -FilePath $script:buildScriptPath -Arguments @('-Version', $version)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter_Debug.exe')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter.exe')) | Should -BeTrue
-        $result.StdOut | Should -Match 'built 1.0.32.1'
+        $result.StdOut | Should -Match 'built 1.0.32.2'
     }
 }
