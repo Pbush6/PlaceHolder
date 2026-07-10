@@ -554,6 +554,8 @@ function Get-MessageRecord {
     $creationTime = Get-PropSafe -Object $Item -Name 'CreationTime' -Default $null
     $entryId = Get-PropSafe -Object $Item -Name 'EntryID' -Default ''
     $body = Get-PropSafe -Object $Item -Name 'Body' -Default ''
+    $conversationTopic = Get-PropSafe -Object $Item -Name 'ConversationTopic' -Default ''
+    $conversationId = Get-PropSafe -Object $Item -Name 'ConversationID' -Default ''
     $sortTime = $receivedTime
     if (Test-MissingDate $sortTime) { $sortTime = $sentOn }
     if (Test-MissingDate $sortTime) { $sortTime = $creationTime }
@@ -587,6 +589,8 @@ function Get-MessageRecord {
         ReceivedTime         = $receivedTime
         CreationTime         = $creationTime
         EntryId              = $entryId
+        ConversationTopic    = $conversationTopic
+        ConversationId       = $conversationId
         BodyText             = [string]$body
         AttachmentsHtml      = Get-AttachmentSummaryHtml -Item $Item
     }
@@ -1303,6 +1307,374 @@ $script
 "@)
 }
 
+# ponytail: keep in sync with sample email threading and Write-EmailHtmlReport
+function Get-NormalizedEmailSubject {
+    param([AllowNull()][object]$Subject)
+
+    $s = [string]$Subject
+    while ($s -match '(?i)^(re|fw|fwd)\s*:\s*') {
+        $s = $s -replace '(?i)^(re|fw|fwd)\s*:\s*', ''
+    }
+    if ([string]::IsNullOrWhiteSpace($s)) { return '(no subject)' }
+    return $s.Trim()
+}
+
+# ponytail: keep in sync with sample email threading and Write-EmailHtmlReport
+function Get-EmailThreadKey {
+    param($Record)
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$Record.ConversationId)) {
+        return 'id:' + [string]$Record.ConversationId
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Record.ConversationTopic)) {
+        return 'topic:' + ([string]$Record.ConversationTopic).Trim().ToLowerInvariant()
+    }
+    $subj = Get-NormalizedEmailSubject -Subject $Record.Subject
+    return "subj:$subj`n$($Record.ParticipantsKey)"
+}
+
+function Format-FolderOptionHtml {
+    param(
+        [Parameter(Mandatory = $true)] [string]$FolderPath
+    )
+
+    $folderLabel = if ([string]::IsNullOrWhiteSpace($FolderPath)) { '(unknown folder)' } else { $FolderPath }
+    return "<label class='folder-option'><input type='checkbox' class='folder-check' value='$(ConvertTo-HtmlEncodedText $folderLabel)'/> <span>$(ConvertTo-HtmlEncodedText $folderLabel)</span></label>"
+}
+
+function Get-EmailReportCss {
+    $baseCss = Get-ReportCss
+    return $baseCss + @'
+.folder-filter .folder-box { max-height: 32vh; overflow: auto; border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: #fbfcff; display: grid; grid-template-columns: 1fr; gap: 5px; }
+.folder-option { display: flex; gap: 8px; align-items: center; padding: 6px 7px; border-radius: 9px; cursor: pointer; font-size: .92rem; font-weight: 700; color: #334155; }
+.folder-option:hover { background: #eef3ff; }
+.email-summary { margin-top: 10px; }
+.email-summary summary { cursor: pointer; font-weight: 800; color: #334155; }
+.email-summary .folder-box { border: 0; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; max-height: 24vh; }
+.email-note { margin-top: 10px; color: var(--muted); font-size: .9rem; }
+.email-from-line { font-size: .95rem; color: #334155; font-weight: 700; }
+.email-details div { margin: 2px 0; }
+'@
+}
+
+function Get-EmailReportScript {
+    return @'
+(function () {
+  const folderChecks = Array.from(document.querySelectorAll('.folder-check'));
+  const personChecks = Array.from(document.querySelectorAll('.person-check'));
+  const participantMatchMode = document.getElementById('participantMatchMode');
+  const startDateFilter = document.getElementById('startDateFilter');
+  const endDateFilter = document.getElementById('endDateFilter');
+  const sortOrder = document.getElementById('sortOrder');
+  const conversationList = document.getElementById('conversationList');
+  const conversations = Array.from(document.querySelectorAll('.conversation'));
+  const resultCount = document.getElementById('resultCount');
+
+  conversations.forEach(conversation => {
+    conversation._searchText = (conversation.textContent || '').replace(/\s+/g, ' ').toLowerCase();
+  });
+
+  function selectedValues(checks) { return checks.filter(c => c.checked).map(c => c.value); }
+  function listFromDataset(node, name) { return (node.dataset[name] || '').split('||').map(v => v.trim()).filter(Boolean); }
+  function messageDate(message) { return (message.dataset.date || '').trim(); }
+  function messageInDateRange(message, startDate, endDate) {
+    const date = messageDate(message);
+    if (!date) return true;
+    if (startDate && date < startDate) return false;
+    if (endDate && date > endDate) return false;
+    return true;
+  }
+  function matchesFolder(conversation, selectedFolders) {
+    if (selectedFolders.length === 0) return true;
+    const folders = listFromDataset(conversation, 'folder');
+    return selectedFolders.some(folder => folders.includes(folder));
+  }
+  function matchesPeople(conversation, selectedPeople, mode) {
+    if (selectedPeople.length === 0) return true;
+    const participants = listFromDataset(conversation, 'participants');
+    if (mode === 'allSelected') {
+      return selectedPeople.every(person => participants.includes(person));
+    }
+    return selectedPeople.some(person => participants.includes(person));
+  }
+  function sortConversations() {
+    if (!conversationList || !sortOrder) return;
+    const order = sortOrder.value || 'newestFirst';
+    const sorted = conversations.slice().sort((a, b) => {
+      const aTime = Date.parse(a.dataset.sortTime || '') || 0;
+      const bTime = Date.parse(b.dataset.sortTime || '') || 0;
+      return order === 'oldestFirst' ? aTime - bTime : bTime - aTime;
+    });
+    sorted.forEach(conversation => conversationList.appendChild(conversation));
+  }
+
+  function applyFilters() {
+    const selectedFolders = selectedValues(folderChecks);
+    const selectedPeople = selectedValues(personChecks);
+    const mode = participantMatchMode ? participantMatchMode.value : 'anySelected';
+    const startDate = startDateFilter ? startDateFilter.value : '';
+    const endDate = endDateFilter ? endDateFilter.value : '';
+    let visibleConversations = 0;
+    let visibleMessages = 0;
+
+    conversations.forEach(conversation => {
+      const conversationMatches = matchesFolder(conversation, selectedFolders) && matchesPeople(conversation, selectedPeople, mode);
+      const messages = Array.from(conversation.querySelectorAll('.message-card'));
+      let conversationVisibleMessages = 0;
+
+      messages.forEach(message => {
+        const showMessage = conversationMatches && messageInDateRange(message, startDate, endDate);
+        message.hidden = !showMessage;
+        if (showMessage) conversationVisibleMessages += 1;
+      });
+
+      conversation.hidden = conversationVisibleMessages === 0;
+      const countEl = conversation.querySelector('.conversation-count');
+      if (countEl) {
+        countEl.textContent = (selectedFolders.length > 0 || selectedPeople.length > 0 || startDate || endDate)
+          ? (conversationVisibleMessages + ' of ' + messages.length + ' messages')
+          : (messages.length + ' messages');
+      }
+      if (!conversation.hidden) {
+        visibleConversations += 1;
+        visibleMessages += conversationVisibleMessages;
+      }
+    });
+
+    sortConversations();
+    if (resultCount) resultCount.textContent = visibleConversations + ' conversations / ' + visibleMessages + ' messages shown';
+  }
+
+  folderChecks.forEach(c => c.addEventListener('change', applyFilters));
+  personChecks.forEach(c => c.addEventListener('change', applyFilters));
+  if (participantMatchMode) participantMatchMode.addEventListener('change', applyFilters);
+  if (startDateFilter) startDateFilter.addEventListener('change', applyFilters);
+  if (endDateFilter) endDateFilter.addEventListener('change', applyFilters);
+  if (sortOrder) sortOrder.addEventListener('change', applyFilters);
+
+  applyFilters();
+})();
+'@
+}
+
+function Write-EmailReportHeader {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)]$PstItem,
+        [Parameter(Mandatory = $true)][int]$ConversationCount,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SortedRecords,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$AllParticipants,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$AllFolders,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$ParticipantOptions,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderOptions,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderSummaryRows
+    )
+
+    $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
+    $css = Get-EmailReportCss
+    $Writer.WriteLine(@"
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Purview Email PST Report - $(ConvertTo-HtmlEncodedText $PstItem.Name)</title>
+<style>
+$css
+</style>
+</head>
+<body>
+<div class='page'>
+  <header class='hero'>
+    <h1>Microsoft Purview eDiscovery Email Report</h1>
+    <p>Threaded email conversations grouped by Outlook conversation data when available, with folder and people filters.</p>
+    <div class='hero-credit'>By Patrick Bush</div>
+  </header>
+
+  <section class='summary-grid' aria-label='Report summary'>
+    <div class='summary-card'><div class='label'>PST</div><div class='value'>$(ConvertTo-HtmlEncodedText $PstItem.Name)</div></div>
+    <div class='summary-card'><div class='label'>Generated</div><div class='value'>$(ConvertTo-HtmlEncodedText $generated)</div></div>
+    <div class='summary-card'><div class='label'>Threads exported</div><div class='value'>$(ConvertTo-HtmlEncodedText $ConversationCount)</div></div>
+    <div class='summary-card'><div class='label'>Messages exported</div><div class='value'>$(ConvertTo-HtmlEncodedText $SortedRecords.Count)</div></div>
+    <div class='summary-card'><div class='label'>Folders detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $AllFolders.Count)</div></div>
+    <div class='summary-card'><div class='label'>People detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $AllParticipants.Count)</div></div>
+    <div class='summary-card'><div class='label'>Read warnings</div><div class='value'>Items: $(ConvertTo-HtmlEncodedText $script:Stats.ItemReadFailures); Attachments: $(ConvertTo-HtmlEncodedText $script:Stats.AttachmentReadFailures)</div></div>
+  </section>
+
+  <div class='review-layout'>
+    <aside class='filter-panel folder-filter' aria-label='Conversation filters'>
+      <div class='filter-title'>
+        <h2>Choose folders and people</h2>
+        <span id='resultCount' class='result-count'></span>
+      </div>
+      <p class='filter-help'>Leave the folder and people checkboxes empty to show everything. Choose Any or All to tighten the people match.</p>
+      <div class='controls'>
+        <label for='participantMatchMode'>People match</label>
+        <select id='participantMatchMode'>
+          <option value='anySelected' selected='selected'>Any selected people</option>
+          <option value='allSelected'>All selected people</option>
+        </select>
+      </div>
+      <details class='email-summary folder-summary'>
+        <summary>Folders</summary>
+        <div id='folderBox' class='folder-box'>
+          <label class='folder-option'><input type='checkbox' id='selectAllFolders' disabled='disabled' hidden='hidden'/> <span>All folders are optional</span></label>
+$($FolderOptions -join "`n")
+        </div>
+      </details>
+      <div class='people-heading'><h3>People</h3></div>
+      <div id='peopleBox' class='people-box'>
+$($ParticipantOptions -join "`n")
+      </div>
+      <div class='email-note'>Message bodies are HTML-encoded for safe review. Each thread stores its folder membership in <code>data-folder</code> and its participants in <code>data-participants</code>.</div>
+      <details class='folder-summary'>
+        <summary>Folder summary</summary>
+        <table>
+          <thead><tr><th>Folder</th><th>Messages</th></tr></thead>
+          <tbody>
+$($FolderSummaryRows -join "`n")
+          </tbody>
+        </table>
+      </details>
+      <div class='footer'>Log file: $(ConvertTo-HtmlEncodedText $script:LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
+    </aside>
+
+    <div id='resizeHandle' class='resize-handle' role='separator' aria-orientation='vertical' aria-label='Resize filter column' tabindex='0' title='Drag to resize the filter column'></div>
+
+    <main id='conversationList' class='conversation-pane'>
+      <section class='conversation-toolbar' aria-label='Date filter and conversation sorting'>
+        <div class='toolbar-field'>
+          <label for='startDateFilter'>Start date</label>
+          <input id='startDateFilter' type='date'/>
+        </div>
+        <div class='toolbar-field'>
+          <label for='endDateFilter'>End date</label>
+          <input id='endDateFilter' type='date'/>
+        </div>
+        <div class='toolbar-field'>
+          <label for='sortOrder'>Sort conversations</label>
+          <select id='sortOrder'>
+            <option value='newestFirst' selected='selected'>Newest first</option>
+            <option value='oldestFirst'>Oldest first</option>
+          </select>
+        </div>
+      </section>
+"@)
+}
+
+function Write-EmailConversationHtml {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)][object]$GroupMessages,
+        [Parameter(Mandatory = $true)][hashtable]$SenderClasses,
+        [Parameter(Mandatory = $true)][ref]$NextSenderIndex
+    )
+
+    $GroupMessages = @($GroupMessages)
+    if ($GroupMessages.Count -eq 0) { return }
+
+    $palette = @('blue','green','purple','orange','red','teal','pink','brown','slate','indigo')
+    $first = $GroupMessages[0]
+    $groupParticipants = @(
+        $GroupMessages | ForEach-Object { @($_.Participants) } | ForEach-Object { $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+    )
+    $groupFolders = @($GroupMessages | ForEach-Object { $_.FolderPath } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $groupSenders = @($GroupMessages | ForEach-Object { $_.SenderDisplay } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $participantData = ConvertTo-HtmlEncodedText ($groupParticipants -join '||')
+    $folderData = ConvertTo-HtmlEncodedText ($groupFolders -join '||')
+    $senderPreview = if ($groupSenders.Count -gt 0) { Format-ParticipantPreview -Participants $groupSenders -MaximumNames 4 -PreferredParticipants @{} } else { '(unknown sender)' }
+    $participantPreview = if ($groupParticipants.Count -gt 0) { Format-ParticipantPreview -Participants $groupParticipants -MaximumNames 4 -PreferredParticipants @{} } else { '(unknown participants)' }
+    $conversationTitle = Get-NormalizedEmailSubject -Subject $first.Subject
+    if ([string]::IsNullOrWhiteSpace($conversationTitle) -or $conversationTitle -eq '(no subject)') {
+        if (-not [string]::IsNullOrWhiteSpace([string]$first.ConversationTopic)) {
+            $conversationTitle = [string]$first.ConversationTopic
+        }
+        else {
+            $conversationTitle = $participantPreview
+        }
+    }
+
+    $conversationSortRecord = @($GroupMessages | Sort-Object @{ Expression = { if ($_.SortTime) { ([datetime]$_.SortTime).Ticks } else { 0 } } } | Select-Object -Last 1)
+    $conversationSortTime = if ($conversationSortRecord -and $conversationSortRecord[0].SortTime) { ([datetime]$conversationSortRecord[0].SortTime).ToString('o') } else { '' }
+
+    $Writer.WriteLine(@"
+<section class='conversation' data-folder='$folderData' data-participants='$participantData' data-sort-time='$(ConvertTo-HtmlEncodedText $conversationSortTime)'>
+  <div class='conversation-header'>
+    <div>
+      <h2>$(ConvertTo-HtmlEncodedText $conversationTitle)</h2>
+      <div class='conversation-people'>From: $(ConvertTo-HtmlEncodedText $senderPreview)</div>
+      <div class='conversation-people'>Participants: $(ConvertTo-HtmlEncodedText $participantPreview)</div>
+    </div>
+    <div class='conversation-count'>$($GroupMessages.Count) messages</div>
+  </div>
+  <div class='conversation-messages'>
+"@)
+
+    foreach ($record in $GroupMessages) {
+        if (-not $SenderClasses.ContainsKey($record.SenderDisplay)) {
+            $SenderClasses[$record.SenderDisplay] = $palette[$NextSenderIndex.Value % $palette.Count]
+            $NextSenderIndex.Value++
+        }
+        $senderClass = $SenderClasses[$record.SenderDisplay]
+        $timeText = if ($record.SortTime) { ([datetime]$record.SortTime).ToString('MMM d, yyyy h:mm tt') } else { '' }
+        $messageDate = if ($record.SortTime) { ([datetime]$record.SortTime).ToString('yyyy-MM-dd') } else { '' }
+        $messageSortTime = if ($record.SortTime) { ([datetime]$record.SortTime).ToString('o') } else { '' }
+        $bodyHtml = ConvertTo-HtmlBody $record.BodyText
+        $sentDisplay = if (Test-MissingDate $record.SentOn) { '' } else { $record.SentOn }
+        $receivedDisplay = if (Test-MissingDate $record.ReceivedTime) { '' } else { $record.ReceivedTime }
+        $senderLine = if ([string]::IsNullOrWhiteSpace([string]$record.SenderDisplay)) { '(unknown sender)' } else { [string]$record.SenderDisplay }
+        $details = @"
+<details class='message-details email-details'>
+  <summary>Details</summary>
+  <div><strong>Folder:</strong> $(ConvertTo-HtmlEncodedText $record.FolderPath)</div>
+  <div><strong>Subject:</strong> $(ConvertTo-HtmlEncodedText (Get-NormalizedEmailSubject -Subject $record.Subject))</div>
+  <div><strong>From:</strong> $(ConvertTo-HtmlEncodedText $record.SenderName) &lt;$(ConvertTo-HtmlEncodedText $record.SenderEmail)&gt;</div>
+  <div><strong>To:</strong> $(ConvertTo-HtmlEncodedText $record.To)</div>
+  <div><strong>Cc:</strong> $(ConvertTo-HtmlEncodedText $record.Cc)</div>
+  <div><strong>Conversation topic:</strong> $(ConvertTo-HtmlEncodedText $record.ConversationTopic)</div>
+  <div><strong>Conversation ID:</strong> <span class='wrap'>$(ConvertTo-HtmlEncodedText $record.ConversationId)</span></div>
+  <div><strong>Message class:</strong> $(ConvertTo-HtmlEncodedText $record.MessageClass)</div>
+  <div><strong>Sent:</strong> $(ConvertTo-HtmlEncodedText $sentDisplay)</div>
+  <div><strong>Received:</strong> $(ConvertTo-HtmlEncodedText $receivedDisplay)</div>
+  <div><strong>Entry ID:</strong> <span class='wrap'>$(ConvertTo-HtmlEncodedText $record.EntryId)</span></div>
+</details>
+"@
+        $Writer.WriteLine(@"
+<article class='message-card sender-$senderClass' data-sender='$(ConvertTo-HtmlEncodedText $record.SenderDisplay)' data-date='$(ConvertTo-HtmlEncodedText $messageDate)' data-time='$(ConvertTo-HtmlEncodedText $messageSortTime)'>
+  <div class='speaker-row'>
+    <span class='speaker-block'><span class='speaker-name'>From: $(ConvertTo-HtmlEncodedText $senderLine)</span><span class='speaker-context'>To: $(ConvertTo-HtmlEncodedText $record.To) • Cc: $(ConvertTo-HtmlEncodedText $record.Cc) • Folder: $(ConvertTo-HtmlEncodedText $record.FolderPath)</span></span>
+    <span class='message-time'>$(ConvertTo-HtmlEncodedText $timeText)</span>
+  </div>
+  <div class='message-body'>$bodyHtml</div>
+  $($record.AttachmentsHtml)
+  $details
+</article>
+"@)
+    }
+
+    $Writer.WriteLine(@"
+  </div>
+</section>
+"@)
+}
+
+function Write-EmailReportFooter {
+    param([Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer)
+
+    $script = Get-EmailReportScript
+    $Writer.WriteLine(@"
+    </main>
+  </div>
+</div>
+<script>
+$script
+</script>
+</body>
+</html>
+"@)
+}
+
+# Task 4 will replace with full email UX.
 function Get-SampleRecord {
     return [pscustomobject]@{
         Teams = @(
@@ -1310,8 +1682,8 @@ function Get-SampleRecord {
             [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:01:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:01:00'; ReceivedTime = [datetime]'2024-01-01T09:01:05'; CreationTime = [datetime]'2024-01-01T09:01:05'; EntryId = 'sample-entry-2'; BodyText = "Thanks.`nThis message has two lines."; AttachmentsHtml = "<div class='attachments'><strong>Attachments:</strong><table><tbody><tr><td>sample.pdf</td><td>sample.pdf</td><td>1234</td></tr></tbody></table></div>" }
         )
         Email = @(
-            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Budget'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nBudget`nSamplePst\Inbox"; ConversationTitle = 'Budget'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Budget attached.'; AttachmentsHtml = '' }
-            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:05:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Re: Budget'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nBudget`nSamplePst\Inbox"; ConversationTitle = 'Budget'; SentOn = [datetime]'2024-01-01T10:05:00'; ReceivedTime = [datetime]'2024-01-01T10:05:05'; CreationTime = [datetime]'2024-01-01T10:05:05'; EntryId = 'sample-entry-4'; BodyText = 'Thanks, I will review it.'; AttachmentsHtml = '' }
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Budget'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "id:sample-conversation-1"; ConversationTitle = 'Budget'; ConversationTopic = 'Budget planning'; ConversationId = 'sample-conversation-1'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Budget attached.'; AttachmentsHtml = '' }
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:05:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Re: Budget'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "id:sample-conversation-1"; ConversationTitle = 'Budget'; ConversationTopic = 'Budget planning'; ConversationId = 'sample-conversation-1'; SentOn = [datetime]'2024-01-01T10:05:00'; ReceivedTime = [datetime]'2024-01-01T10:05:05'; CreationTime = [datetime]'2024-01-01T10:05:05'; EntryId = 'sample-entry-4'; BodyText = 'Thanks, I will review it.'; AttachmentsHtml = '' }
         )
     }
 }
@@ -1389,32 +1761,58 @@ function Write-EmailHtmlReport {
 
     Write-ReportLog 'Preparing Email HTML report data.'
     Write-ConversionStage -Stage 'PreparingReport'
-    $sorted = @($Records | Sort-Object @{ Expression = { if ($_.SortTime) { ([datetime]$_.SortTime).Ticks } else { 0 } } }, ParticipantsKey, Subject, FolderPath)
+    $sorted = @($Records | Sort-Object @{ Expression = { if ($_.SortTime) { ([datetime]$_.SortTime).Ticks } else { 0 } } }, FolderPath, Subject, ParticipantsKey)
+
+    $participantSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $folderSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($record in $sorted) {
+        foreach ($participant in @($record.Participants)) {
+            if (-not [string]::IsNullOrWhiteSpace($participant)) { [void]$participantSet.Add($participant) }
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$record.FolderPath)) { [void]$folderSet.Add([string]$record.FolderPath) }
+    }
+
+    $allParticipants = @($participantSet | Sort-Object)
+    $allFolders = @($folderSet | Sort-Object)
+    $participantOptions = @(foreach ($participant in $allParticipants) { Format-ParticipantOptionHtml -Participant $participant -DefaultParticipants @() })
+    $folderOptions = @(foreach ($folder in $allFolders) { Format-FolderOptionHtml -FolderPath $folder })
+    $folderSummaryRows = @(
+        $sorted | Group-Object FolderPath | Sort-Object Name | ForEach-Object {
+            '<tr><td>{0}</td><td>{1}</td></tr>' -f (ConvertTo-HtmlEncodedText $_.Name), $_.Count
+        }
+    )
+
+    $groups = [ordered]@{}
+    foreach ($record in $sorted) {
+        $key = Get-EmailThreadKey -Record $record
+        if (-not $groups.Contains($key)) {
+            $groups[$key] = New-Object System.Collections.Generic.List[object]
+        }
+        [void]$groups[$key].Add($record)
+    }
+
+    $groupCount = [Math]::Max(1, $groups.Count)
+    Write-ReportLog "Writing Email HTML report: 0 of $groupCount conversations."
+    Write-ConversionStage -Stage 'WritingReport' -Extra ("Written=0|Total={0}" -f $groupCount)
+
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
     try {
-        $writer.WriteLine(@"
-<!doctype html>
-<html lang='en'>
-<head>
-<meta charset='utf-8'>
-<meta name='viewport' content='width=device-width, initial-scale=1'>
-<title>Purview Email PST Report - $(ConvertTo-HtmlEncodedText $PstItem.Name)</title>
-<style>
-body { font-family: "Segoe UI", Arial, sans-serif; margin: 24px; color: #1f2937; }
-.card { max-width: 900px; margin: 0 auto; padding: 20px; border: 1px solid #d9e0ea; border-radius: 14px; background: #fff; }
-.muted { color: #5b6472; }
-</style>
-</head>
-<body>
-  <div class='card'>
-    <h1>Purview Email PST Report</h1>
-    <p class='muted'>PST: $(ConvertTo-HtmlEncodedText $PstItem.Name)</p>
-    <p>Message count: $(ConvertTo-HtmlEncodedText $sorted.Count)</p>
-  </div>
-</body>
-</html>
-"@)
+        Write-EmailReportHeader -Writer $writer -PstItem $PstItem -ConversationCount $groups.Count -SortedRecords $sorted -AllParticipants $allParticipants -AllFolders $allFolders -ParticipantOptions $participantOptions -FolderOptions $folderOptions -FolderSummaryRows $folderSummaryRows
+        $senderClasses = @{}
+        $nextSenderIndex = 0
+        $writtenGroups = 0
+        foreach ($key in $groups.Keys) {
+            Write-EmailConversationHtml -Writer $writer -GroupMessages $groups[$key].ToArray() -SenderClasses $senderClasses -NextSenderIndex ([ref]$nextSenderIndex)
+            $writtenGroups++
+            if (($writtenGroups -eq $groupCount) -or ($writtenGroups % 50 -eq 0)) {
+                Write-ReportLog "Email HTML report progress: $writtenGroups of $groupCount conversations."
+                Write-ConversionStage -Stage 'WritingReport' -Extra ("Written={0}|Total={1}" -f $writtenGroups, $groupCount)
+            }
+        }
+        Write-ReportLog 'Finalizing Email HTML report.'
+        Write-ConversionStage -Stage 'Finalizing'
+        Write-EmailReportFooter -Writer $writer
     }
     finally {
         $writer.Dispose()
