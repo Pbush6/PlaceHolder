@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery Teams PST export into a searchable, filterable HTML conversation report on Windows.
 
-**Current version:** 1.0.32.0  
+**Current version:** 1.0.32.1  
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -65,7 +65,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.32.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.32.1
 ```
 
 Outputs:

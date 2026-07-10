@@ -188,15 +188,26 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $body | Should -Match 'Get-ConversionPathsFromResultLine'
         $body | Should -Match 'lastReportPaths'
         $body | Should -Match 'one or more report files'
+        $body | Should -Match 'Get-FallbackWritePaths'
+    }
+
+    It 'GUI success gate captures RESULT during progress drain and never requires dual DisplayPath' {
+        $launcherText = Get-Content -LiteralPath $script:launcherPath -Raw
+        $launcherText | Should -Match 'capturedResultLine'
+        $launcherText | Should -Match 'Get-FallbackWritePaths'
+        $launcherText | Should -Match 'Get-WritePathsFromResultFields'
+        $launcherText | Should -Match "TeamsOutputPath', 'EmailOutputPath"
+        # Progress drain must capture RESULT/ERROR before ConvertFrom-ProgressStdoutLine discards them
+        $launcherText | Should -Match '(?s)while \(\$queue\.TryDequeue\(\[ref\]\$item\)\).*CONVERSION_RESULT\|.*ConvertFrom-ProgressStdoutLine'
     }
 
     It 'builds debug and release executables' {
-        $version = '1.0.32.0'
+        $version = '1.0.32.1'
         $result = & $script:invokePwshScriptCapture -FilePath $script:buildScriptPath -Arguments @('-Version', $version)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter_Debug.exe')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter.exe')) | Should -BeTrue
-        $result.StdOut | Should -Match 'built 1.0.32.0'
+        $result.StdOut | Should -Match 'built 1.0.32.1'
     }
 }

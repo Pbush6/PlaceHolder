@@ -43,3 +43,44 @@ function Get-ReportOutputPaths {
     }
     [pscustomobject]@{ DisplayPath = $display; TeamsPath = $teamsPath; EmailPath = $emailPath }
 }
+
+function Get-WritePathsFromResultFields {
+    # Prefer typed Teams/Email write targets. Never treat dual-mode DisplayPath (OutputPath /
+    # LogPath when both reports are selected and typed paths exist) as a required file.
+    param([AllowNull()][hashtable]$Fields)
+    if ($null -eq $Fields) { $Fields = @{} }
+    $reportPaths = [System.Collections.Generic.List[string]]::new()
+    $hasTypedReport = $false
+    foreach ($key in @('TeamsOutputPath', 'EmailOutputPath')) {
+        if ($Fields.ContainsKey($key)) {
+            $path = [string]$Fields[$key]
+            if (-not [string]::IsNullOrWhiteSpace($path)) {
+                $hasTypedReport = $true
+                if (-not $reportPaths.Contains($path)) { [void]$reportPaths.Add($path) }
+            }
+        }
+    }
+    if (-not $hasTypedReport -and $Fields.ContainsKey('OutputPath')) {
+        $path = [string]$Fields['OutputPath']
+        if (-not [string]::IsNullOrWhiteSpace($path)) { [void]$reportPaths.Add($path) }
+    }
+    $logPaths = [System.Collections.Generic.List[string]]::new()
+    $hasTypedLog = $false
+    foreach ($key in @('TeamsLogPath', 'EmailLogPath')) {
+        if ($Fields.ContainsKey($key)) {
+            $path = [string]$Fields[$key]
+            if (-not [string]::IsNullOrWhiteSpace($path)) {
+                $hasTypedLog = $true
+                if (-not $logPaths.Contains($path)) { [void]$logPaths.Add($path) }
+            }
+        }
+    }
+    if (-not $hasTypedLog -and $Fields.ContainsKey('LogPath')) {
+        $path = [string]$Fields['LogPath']
+        if (-not [string]::IsNullOrWhiteSpace($path)) { [void]$logPaths.Add($path) }
+    }
+    [pscustomobject]@{
+        ReportPaths = $reportPaths.ToArray()
+        LogPaths = $logPaths.ToArray()
+    }
+}

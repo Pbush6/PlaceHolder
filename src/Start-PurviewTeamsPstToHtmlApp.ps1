@@ -571,28 +571,79 @@ function ConvertFrom-ResultLine {
     return $result
 }
 
-function Get-ConversionPathsFromResultLine {
-    param([AllowNull()][string]$ResultLine)
-    $parsed = ConvertFrom-ResultLine -ResultLine $ResultLine
+# ponytail: keep in sync with ReportPathNaming.ps1 Get-WritePathsFromResultFields
+function Get-WritePathsFromResultFields {
+    # Prefer typed Teams/Email write targets. Never treat dual-mode DisplayPath (OutputPath /
+    # LogPath when both reports are selected and typed paths exist) as a required file.
+    param([AllowNull()][hashtable]$Fields)
+    if ($null -eq $Fields) { $Fields = @{} }
     $reportPaths = [System.Collections.Generic.List[string]]::new()
-    foreach ($key in @('OutputPath', 'TeamsOutputPath', 'EmailOutputPath')) {
-        if ($parsed.ContainsKey($key)) {
-            $path = [string]$parsed[$key]
-            if (-not [string]::IsNullOrWhiteSpace($path) -and -not $reportPaths.Contains($path)) { [void]$reportPaths.Add($path) }
+    $hasTypedReport = $false
+    foreach ($key in @('TeamsOutputPath', 'EmailOutputPath')) {
+        if ($Fields.ContainsKey($key)) {
+            $path = [string]$Fields[$key]
+            if (-not [string]::IsNullOrWhiteSpace($path)) {
+                $hasTypedReport = $true
+                if (-not $reportPaths.Contains($path)) { [void]$reportPaths.Add($path) }
+            }
         }
+    }
+    if (-not $hasTypedReport -and $Fields.ContainsKey('OutputPath')) {
+        $path = [string]$Fields['OutputPath']
+        if (-not [string]::IsNullOrWhiteSpace($path)) { [void]$reportPaths.Add($path) }
     }
     $logPaths = [System.Collections.Generic.List[string]]::new()
-    foreach ($key in @('LogPath', 'TeamsLogPath', 'EmailLogPath')) {
-        if ($parsed.ContainsKey($key)) {
-            $path = [string]$parsed[$key]
-            if (-not [string]::IsNullOrWhiteSpace($path) -and -not $logPaths.Contains($path)) { [void]$logPaths.Add($path) }
+    $hasTypedLog = $false
+    foreach ($key in @('TeamsLogPath', 'EmailLogPath')) {
+        if ($Fields.ContainsKey($key)) {
+            $path = [string]$Fields[$key]
+            if (-not [string]::IsNullOrWhiteSpace($path)) {
+                $hasTypedLog = $true
+                if (-not $logPaths.Contains($path)) { [void]$logPaths.Add($path) }
+            }
         }
     }
+    if (-not $hasTypedLog -and $Fields.ContainsKey('LogPath')) {
+        $path = [string]$Fields['LogPath']
+        if (-not [string]::IsNullOrWhiteSpace($path)) { [void]$logPaths.Add($path) }
+    }
     [pscustomobject]@{
-        Parsed = $parsed
         ReportPaths = $reportPaths.ToArray()
         LogPaths = $logPaths.ToArray()
     }
+}
+
+function Get-ConversionPathsFromResultLine {
+    param([AllowNull()][string]$ResultLine)
+    $parsed = ConvertFrom-ResultLine -ResultLine $ResultLine
+    $writePaths = Get-WritePathsFromResultFields -Fields $parsed
+    [pscustomobject]@{
+        Parsed = $parsed
+        ReportPaths = $writePaths.ReportPaths
+        LogPaths = $writePaths.LogPaths
+    }
+}
+
+function Get-FallbackWritePaths {
+    # When CONVERSION_RESULT is missing, resolve actual write targets from the display path —
+    # never require the dual-mode unsuffixed DisplayPath file itself.
+    param(
+        [Parameter(Mandatory = $true)][string]$DisplayPath,
+        [Parameter(Mandatory = $true)][bool]$TeamsReport,
+        [Parameter(Mandatory = $true)][bool]$EmailReport
+    )
+    $resolved = Get-ReportOutputPaths -DisplayPath $DisplayPath -TeamsReport $TeamsReport -EmailReport $EmailReport
+    @($resolved.TeamsPath, $resolved.EmailPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+}
+
+function Get-FallbackLogPaths {
+    param(
+        [Parameter(Mandatory = $true)][string]$DisplayPath,
+        [Parameter(Mandatory = $true)][bool]$TeamsReport,
+        [Parameter(Mandatory = $true)][bool]$EmailReport
+    )
+    $resolved = Get-ReportOutputPaths -DisplayPath $DisplayPath -TeamsReport $TeamsReport -EmailReport $EmailReport
+    @($resolved.TeamsPath, $resolved.EmailPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 }
 
 function Get-StdoutErrorDetail {
@@ -661,8 +712,12 @@ function Start-NoGuiMode {
         $paths = Get-ConversionPathsFromResultLine -ResultLine $result.ResultLine
         $script:lastReportPaths = @($paths.ReportPaths)
         $script:lastLogPaths = @($paths.LogPaths)
-        if (-not $script:lastReportPaths.Count) { $script:lastReportPaths = @($OutputPath) }
-        if (-not $script:lastLogPaths.Count) { $script:lastLogPaths = @($LogPath) }
+        if (-not $script:lastReportPaths.Count) {
+            $script:lastReportPaths = @(Get-FallbackWritePaths -DisplayPath $OutputPath -TeamsReport $TeamsReport -EmailReport $EmailReport)
+        }
+        if (-not $script:lastLogPaths.Count) {
+            $script:lastLogPaths = @(Get-FallbackLogPaths -DisplayPath $LogPath -TeamsReport $TeamsReport -EmailReport $EmailReport)
+        }
         $missingReports = @($script:lastReportPaths | Where-Object { -not (Test-Path -LiteralPath $_) })
         if ($missingReports.Count -gt 0) {
             [Console]::Error.WriteLine("Converter reported success but one or more report files were not found:`n$($missingReports -join "`n")")
@@ -978,6 +1033,8 @@ function Start-GuiMode {
     $script:conversionStartedAt = $null
     $script:lastProgressValue = 0
     $script:activeRunId = $null
+    $script:capturedResultLine = $null
+    $script:capturedErrorLine = $null
     $script:sawStdoutProgress = $false
     $script:lastStatusBase = 'Reading PST...'
 
@@ -994,11 +1051,15 @@ function Start-GuiMode {
         # thread-safe queue here (on the UI thread) and gating each line by $script:activeRunId
         # makes the bar structurally immune to stale logs and core prose changes. The log file is
         # no longer parsed for progress - only for fatal-error detail on a nonzero exit below.
+        # Capture RESULT/ERROR during every drain so the progress pass cannot discard them before
+        # HasExited handling (that race previously fell back to dual-mode DisplayPath).
         $latest = $null
         $queue = $script:activeConversion.OutputQueue
         if ($queue) {
             $item = $null
             while ($queue.TryDequeue([ref]$item)) {
+                if ($item -like 'CONVERSION_ERROR|*') { $script:capturedErrorLine = $item }
+                if ($item -like 'CONVERSION_RESULT|*') { $script:capturedResultLine = $item }
                 $parsed = ConvertFrom-ProgressStdoutLine -Line $item -ExpectedRunId $script:activeRunId
                 if ($null -ne $parsed) { $latest = $parsed }
             }
@@ -1023,13 +1084,11 @@ function Start-GuiMode {
             $progressTimer.Stop()
             # Drain any stdout lines still in flight when the child exits (race between
             # async reader and the final CONVERSION_RESULT / CONVERSION_ERROR line).
-            $capturedErrorLine = $null
-            $capturedResultLine = $null
             if ($queue) {
                 $item = $null
                 while ($queue.TryDequeue([ref]$item)) {
-                    if ($item -like 'CONVERSION_ERROR|*') { $capturedErrorLine = $item }
-                    if ($item -like 'CONVERSION_RESULT|*') { $capturedResultLine = $item }
+                    if ($item -like 'CONVERSION_ERROR|*') { $script:capturedErrorLine = $item }
+                    if ($item -like 'CONVERSION_RESULT|*') { $script:capturedResultLine = $item }
                     $parsed = ConvertFrom-ProgressStdoutLine -Line $item -ExpectedRunId $script:activeRunId
                     if ($null -ne $parsed) { $latest = $parsed }
                 }
@@ -1037,15 +1096,19 @@ function Start-GuiMode {
             try {
                 if ($proc.ExitCode -ne 0) {
                     $detail = ''
-                    $stdoutError = Get-StdoutErrorDetail -ErrorLine $capturedErrorLine -LogPath $script:activeConversion.LogPath
+                    $stdoutError = Get-StdoutErrorDetail -ErrorLine $script:capturedErrorLine -LogPath $script:activeConversion.LogPath
                     if ($stdoutError) { $detail = "`n`n$stdoutError" }
                     throw "Converter exited with code $($proc.ExitCode). See the log file for details.$detail"
                 }
-                $paths = Get-ConversionPathsFromResultLine -ResultLine $capturedResultLine
+                $paths = Get-ConversionPathsFromResultLine -ResultLine $script:capturedResultLine
                 $script:lastReportPaths = @($paths.ReportPaths)
                 $script:lastLogPaths = @($paths.LogPaths)
-                if (-not $script:lastReportPaths.Count) { $script:lastReportPaths = @($script:activeConversion.OutputPath) }
-                if (-not $script:lastLogPaths.Count) { $script:lastLogPaths = @($script:activeConversion.LogPath) }
+                if (-not $script:lastReportPaths.Count) {
+                    $script:lastReportPaths = @(Get-FallbackWritePaths -DisplayPath $script:activeConversion.OutputPath -TeamsReport $script:activeConversion.TeamsReport -EmailReport $script:activeConversion.EmailReport)
+                }
+                if (-not $script:lastLogPaths.Count) {
+                    $script:lastLogPaths = @(Get-FallbackLogPaths -DisplayPath $script:activeConversion.LogPath -TeamsReport $script:activeConversion.TeamsReport -EmailReport $script:activeConversion.EmailReport)
+                }
 
                 $missingReports = @($script:lastReportPaths | Where-Object { -not (Test-Path -LiteralPath $_) })
                 if ($missingReports.Count -gt 0) {
@@ -1154,12 +1217,16 @@ function Start-GuiMode {
             Set-ConversionProgress 12 'Starting PST read...'
             $script:conversionStartedAt = Get-Date
             $script:activeRunId = [guid]::NewGuid().ToString('N')
+            $script:capturedResultLine = $null
+            $script:capturedErrorLine = $null
             $script:activeConversion = Start-EmbeddedConversionProcess -PstPath $pstBox.Text -OutputPath $outputBox.Text -LogPath $logBox.Text -DefaultConversationParticipants @() -TeamsReport:$teamsCheck.Checked -EmailReport:$emailCheck.Checked -KeepPstAttached:($keepCheck.Checked) -UseSampleData:$false -RunId $script:activeRunId
             # Snapshot the normalized paths so mid-run edits to the (now-disabled) textboxes can't
             # redirect the active-run fatal-detail read, completion report, or opened log.
             $script:activeConversion | Add-Member -NotePropertyName PstPath -NotePropertyValue ([IO.Path]::GetFullPath($pstBox.Text))
             $script:activeConversion | Add-Member -NotePropertyName OutputPath -NotePropertyValue ([IO.Path]::GetFullPath($outputBox.Text))
             $script:activeConversion | Add-Member -NotePropertyName LogPath -NotePropertyValue ([IO.Path]::GetFullPath($logBox.Text))
+            $script:activeConversion | Add-Member -NotePropertyName TeamsReport -NotePropertyValue ([bool]$teamsCheck.Checked)
+            $script:activeConversion | Add-Member -NotePropertyName EmailReport -NotePropertyValue ([bool]$emailCheck.Checked)
             $cancelButton.Enabled = $true
             $progressTimer.Start()
         }

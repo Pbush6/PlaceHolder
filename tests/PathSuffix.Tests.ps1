@@ -34,4 +34,30 @@ Describe 'Report path naming' {
         $r.EmailPath | Should -Be 'C:\out\LArtley Messages_Email.html'
         $r.TeamsPath | Should -BeNullOrEmpty
     }
+
+    It 'dual-mode result fields prefer typed write targets over DisplayPath OutputPath' {
+        $fields = @{
+            OutputPath = 'C:\out\LArtley Messages.html'
+            LogPath = 'C:\out\LArtley Messages.log'
+            TeamsOutputPath = 'C:\out\LArtley Messages_Teams.html'
+            EmailOutputPath = 'C:\out\LArtley Messages_Email.html'
+            TeamsLogPath = 'C:\out\LArtley Messages_Teams.log'
+            EmailLogPath = 'C:\out\LArtley Messages_Email.log'
+        }
+        $w = Get-WritePathsFromResultFields -Fields $fields
+        $w.ReportPaths | Should -Be @('C:\out\LArtley Messages_Teams.html', 'C:\out\LArtley Messages_Email.html')
+        $w.LogPaths | Should -Be @('C:\out\LArtley Messages_Teams.log', 'C:\out\LArtley Messages_Email.log')
+        $w.ReportPaths | Should -Not -Contain 'C:\out\LArtley Messages.html'
+        $w.LogPaths | Should -Not -Contain 'C:\out\LArtley Messages.log'
+    }
+
+    It 'single-mode result fields fall back to OutputPath when typed paths absent' {
+        $fields = @{
+            OutputPath = 'C:\out\LArtley Messages_Teams.html'
+            LogPath = 'C:\out\LArtley Messages_Teams.log'
+        }
+        $w = Get-WritePathsFromResultFields -Fields $fields
+        $w.ReportPaths | Should -Be @('C:\out\LArtley Messages_Teams.html')
+        $w.LogPaths | Should -Be @('C:\out\LArtley Messages_Teams.log')
+    }
 }
