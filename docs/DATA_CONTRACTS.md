@@ -1,7 +1,7 @@
 # Purview Teams PST → HTML — Data Contracts
 
-**Version:** 1.0.32.2  
-**Last updated:** 2026-07-08
+**Version:** 1.0.33.0  
+**Last updated:** 2026-07-11
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
 
@@ -50,7 +50,9 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 
 ## 4. HTML report contract (grep-validated)
 
-Required DOM markers: `participantMatchMode`, `startDateFilter`, `endDateFilter`, `sortOrder`, `conversation-toolbar`, `hero-credit` containing `By Patrick Bush`.
+**Teams report** required DOM markers: `participantMatchMode`, `startDateFilter`, `endDateFilter`, `sortOrder`, `conversation-toolbar`, `hero-credit` containing `By Patrick Bush`.
+
+**Email report** required DOM markers: `peopleSearch`, `folder-filter`, `data-folder`, `startDateFilter`, `endDateFilter`, `sortOrder`, `conversation-toolbar`, `hero-credit` containing `By Patrick Bush`. Folder filter checkboxes keep the full path in `value` and show the leaf folder name in the label. Read warnings are omitted from the summary strip; when counts are greater than zero they appear as a collapsed `read-warnings` block in the left panel footer.
 
 All user-controlled text passes `ConvertTo-HtmlEncodedText`.
 

@@ -1341,13 +1341,32 @@ function Get-EmailThreadKey {
     return "subj:$subj`n$($Record.ParticipantsKey)"
 }
 
+function Get-EmailFolderLeafLabel {
+    param([AllowNull()][string]$FolderPath)
+
+    if ([string]::IsNullOrWhiteSpace($FolderPath)) { return '(unknown folder)' }
+    $parts = @($FolderPath -split '[\\/]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($parts.Count -eq 0) { return '(unknown folder)' }
+    return $parts[-1]
+}
+
 function Format-FolderOptionHtml {
     param(
         [Parameter(Mandatory = $true)] [string]$FolderPath
     )
 
-    $folderLabel = if ([string]::IsNullOrWhiteSpace($FolderPath)) { '(unknown folder)' } else { $FolderPath }
-    return "<label class='folder-option'><input type='checkbox' class='folder-check' value='$(ConvertTo-HtmlEncodedText $folderLabel)'/> <span>$(ConvertTo-HtmlEncodedText $folderLabel)</span></label>"
+    $folderValue = if ([string]::IsNullOrWhiteSpace($FolderPath)) { '(unknown folder)' } else { $FolderPath }
+    $folderLabel = Get-EmailFolderLeafLabel -FolderPath $FolderPath
+    return "<label class='folder-option' title='$(ConvertTo-HtmlEncodedText $folderValue)'><input type='checkbox' class='folder-check' value='$(ConvertTo-HtmlEncodedText $folderValue)'/> <span>$(ConvertTo-HtmlEncodedText $folderLabel)</span></label>"
+}
+
+function Format-TopSenderOptionHtml {
+    param(
+        [Parameter(Mandatory = $true)] [string]$SenderDisplay,
+        [Parameter(Mandatory = $true)] [int]$MessageCount
+    )
+
+    return "<button type='button' class='top-sender' data-query='$(ConvertTo-HtmlEncodedText $SenderDisplay)'>$(ConvertTo-HtmlEncodedText $SenderDisplay) <span class='top-sender-count'>($MessageCount)</span></button>"
 }
 
 function Get-EmailReportCss {
@@ -1359,6 +1378,14 @@ function Get-EmailReportCss {
 .email-summary { margin-top: 10px; }
 .email-summary summary { cursor: pointer; font-weight: 800; color: #334155; }
 .email-summary .folder-box { border: 0; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; max-height: 24vh; }
+.people-search-wrap { display: grid; gap: 6px; margin-top: 4px; }
+.people-search-wrap input[type='search'] { width: 100%; box-sizing: border-box; }
+.top-senders { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }
+.top-sender { border: 1px solid var(--line); background: #fbfcff; border-radius: 999px; padding: 5px 10px; font-size: .85rem; font-weight: 700; color: #334155; cursor: pointer; }
+.top-sender:hover { background: #eef3ff; }
+.top-sender-count { color: var(--muted); font-weight: 600; }
+.read-warnings { margin-top: 12px; color: #7c2d12; font-size: .9rem; }
+.read-warnings summary { cursor: pointer; font-weight: 800; }
 .email-note { margin-top: 10px; color: var(--muted); font-size: .9rem; }
 .email-from-line { font-size: .95rem; color: #334155; font-weight: 700; }
 .email-details div { margin: 2px 0; }
@@ -1369,8 +1396,8 @@ function Get-EmailReportScript {
     return @'
 (function () {
   const folderChecks = Array.from(document.querySelectorAll('.folder-check'));
-  const personChecks = Array.from(document.querySelectorAll('.person-check'));
-  const participantMatchMode = document.getElementById('participantMatchMode');
+  const peopleSearch = document.getElementById('peopleSearch');
+  const topSenderButtons = Array.from(document.querySelectorAll('.top-sender'));
   const startDateFilter = document.getElementById('startDateFilter');
   const endDateFilter = document.getElementById('endDateFilter');
   const sortOrder = document.getElementById('sortOrder');
@@ -1397,13 +1424,12 @@ function Get-EmailReportScript {
     const folders = listFromDataset(conversation, 'folder');
     return selectedFolders.some(folder => folders.includes(folder));
   }
-  function matchesPeople(conversation, selectedPeople, mode) {
-    if (selectedPeople.length === 0) return true;
-    const participants = listFromDataset(conversation, 'participants');
-    if (mode === 'allSelected') {
-      return selectedPeople.every(person => participants.includes(person));
-    }
-    return selectedPeople.some(person => participants.includes(person));
+  function matchesPeople(conversation, query) {
+    if (!query) return true;
+    const needle = query.toLowerCase();
+    const participants = (conversation.dataset.participants || '').toLowerCase();
+    if (participants.includes(needle)) return true;
+    return !!(conversation._searchText && conversation._searchText.includes(needle));
   }
   function sortConversations() {
     if (!conversationList || !sortOrder) return;
@@ -1418,15 +1444,14 @@ function Get-EmailReportScript {
 
   function applyFilters() {
     const selectedFolders = selectedValues(folderChecks);
-    const selectedPeople = selectedValues(personChecks);
-    const mode = participantMatchMode ? participantMatchMode.value : 'anySelected';
+    const peopleQuery = peopleSearch ? peopleSearch.value.trim() : '';
     const startDate = startDateFilter ? startDateFilter.value : '';
     const endDate = endDateFilter ? endDateFilter.value : '';
     let visibleConversations = 0;
     let visibleMessages = 0;
 
     conversations.forEach(conversation => {
-      const conversationMatches = matchesFolder(conversation, selectedFolders) && matchesPeople(conversation, selectedPeople, mode);
+      const conversationMatches = matchesFolder(conversation, selectedFolders) && matchesPeople(conversation, peopleQuery);
       const messages = Array.from(conversation.querySelectorAll('.message-card'));
       let conversationVisibleMessages = 0;
 
@@ -1439,7 +1464,7 @@ function Get-EmailReportScript {
       conversation.hidden = conversationVisibleMessages === 0;
       const countEl = conversation.querySelector('.conversation-count');
       if (countEl) {
-        countEl.textContent = (selectedFolders.length > 0 || selectedPeople.length > 0 || startDate || endDate)
+        countEl.textContent = (selectedFolders.length > 0 || peopleQuery || startDate || endDate)
           ? (conversationVisibleMessages + ' of ' + messages.length + ' messages')
           : (messages.length + ' messages');
       }
@@ -1454,8 +1479,16 @@ function Get-EmailReportScript {
   }
 
   folderChecks.forEach(c => c.addEventListener('change', applyFilters));
-  personChecks.forEach(c => c.addEventListener('change', applyFilters));
-  if (participantMatchMode) participantMatchMode.addEventListener('change', applyFilters);
+  if (peopleSearch) {
+    peopleSearch.addEventListener('input', applyFilters);
+    peopleSearch.addEventListener('search', applyFilters);
+  }
+  topSenderButtons.forEach(button => button.addEventListener('click', () => {
+    if (!peopleSearch) return;
+    peopleSearch.value = button.dataset.query || '';
+    peopleSearch.focus();
+    applyFilters();
+  }));
   if (startDateFilter) startDateFilter.addEventListener('change', applyFilters);
   if (endDateFilter) endDateFilter.addEventListener('change', applyFilters);
   if (sortOrder) sortOrder.addEventListener('change', applyFilters);
@@ -1473,13 +1506,35 @@ function Write-EmailReportHeader {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SortedRecords,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$AllParticipants,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$AllFolders,
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$ParticipantOptions,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderOptions,
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderSummaryRows
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderSummaryRows,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$TopSenderOptions
     )
 
     $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
     $css = Get-EmailReportCss
+    $itemWarn = [int]$script:Stats.ItemReadFailures
+    $attachWarn = [int]$script:Stats.AttachmentReadFailures
+    $readWarningsBlock = ''
+    if ($itemWarn -gt 0 -or $attachWarn -gt 0) {
+        $readWarningsBlock = @"
+      <details class='read-warnings'>
+        <summary>Read warnings</summary>
+        <div>Items: $(ConvertTo-HtmlEncodedText $itemWarn); Attachments: $(ConvertTo-HtmlEncodedText $attachWarn)</div>
+      </details>
+"@
+    }
+    $topSendersBlock = ''
+    if ($TopSenderOptions.Count -gt 0) {
+        $topSendersBlock = @"
+      <details class='email-summary top-senders-summary'>
+        <summary>Top senders</summary>
+        <div class='top-senders'>
+$($TopSenderOptions -join "`n")
+        </div>
+      </details>
+"@
+    }
     $Writer.WriteLine(@"
 <!doctype html>
 <html lang='en'>
@@ -1506,7 +1561,6 @@ $css
     <div class='summary-card'><div class='label'>Messages exported</div><div class='value'>$(ConvertTo-HtmlEncodedText $SortedRecords.Count)</div></div>
     <div class='summary-card'><div class='label'>Folders detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $AllFolders.Count)</div></div>
     <div class='summary-card'><div class='label'>People detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $AllParticipants.Count)</div></div>
-    <div class='summary-card'><div class='label'>Read warnings</div><div class='value'>Items: $(ConvertTo-HtmlEncodedText $script:Stats.ItemReadFailures); Attachments: $(ConvertTo-HtmlEncodedText $script:Stats.AttachmentReadFailures)</div></div>
   </section>
 
   <div class='review-layout'>
@@ -1515,15 +1569,8 @@ $css
         <h2>Choose folders and people</h2>
         <span id='resultCount' class='result-count'></span>
       </div>
-      <p class='filter-help'>Leave the folder and people checkboxes empty to show everything. Choose Any or All to tighten the people match.</p>
-      <div class='controls'>
-        <label for='participantMatchMode'>People match</label>
-        <select id='participantMatchMode'>
-          <option value='anySelected' selected='selected'>Any selected people</option>
-          <option value='allSelected'>All selected people</option>
-        </select>
-      </div>
-      <details class='email-summary folder-summary'>
+      <p class='filter-help'>Leave folders unchecked and the people search empty to show everything. Type a name or address to narrow threads.</p>
+      <details class='email-summary folder-summary' open='open'>
         <summary>Folders</summary>
         <div id='folderBox' class='folder-box'>
           <label class='folder-option'><input type='checkbox' id='selectAllFolders' disabled='disabled' hidden='hidden'/> <span>All folders are optional</span></label>
@@ -1531,10 +1578,12 @@ $($FolderOptions -join "`n")
         </div>
       </details>
       <div class='people-heading'><h3>People</h3></div>
-      <div id='peopleBox' class='people-box'>
-$($ParticipantOptions -join "`n")
+      <div class='people-search-wrap'>
+        <label for='peopleSearch'>Search people</label>
+        <input id='peopleSearch' type='search' placeholder='Name or email address' autocomplete='off'/>
       </div>
-      <div class='email-note'>Message bodies are HTML-encoded for safe review. Each thread stores its folder membership in <code>data-folder</code> and its participants in <code>data-participants</code>.</div>
+$topSendersBlock
+      <div class='email-note'>Message bodies are HTML-encoded for safe review. Folder checkboxes keep the full path in their value; labels show the leaf folder name. Full folder paths remain in each message's Details.</div>
       <details class='folder-summary'>
         <summary>Folder summary</summary>
         <table>
@@ -1544,6 +1593,7 @@ $($FolderSummaryRows -join "`n")
           </tbody>
         </table>
       </details>
+$readWarningsBlock
       <div class='footer'>Log file: $(ConvertTo-HtmlEncodedText $script:LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
     </aside>
 
@@ -1631,6 +1681,7 @@ function Write-EmailConversationHtml {
         $sentDisplay = if (Test-MissingDate $record.SentOn) { '' } else { $record.SentOn }
         $receivedDisplay = if (Test-MissingDate $record.ReceivedTime) { '' } else { $record.ReceivedTime }
         $senderLine = if ([string]::IsNullOrWhiteSpace([string]$record.SenderDisplay)) { '(unknown sender)' } else { [string]$record.SenderDisplay }
+        $folderLeaf = Get-EmailFolderLeafLabel -FolderPath $record.FolderPath
         $details = @"
 <details class='message-details email-details'>
   <summary>Details</summary>
@@ -1650,7 +1701,7 @@ function Write-EmailConversationHtml {
         $Writer.WriteLine(@"
 <article class='message-card sender-$senderClass' data-sender='$(ConvertTo-HtmlEncodedText $record.SenderDisplay)' data-date='$(ConvertTo-HtmlEncodedText $messageDate)' data-time='$(ConvertTo-HtmlEncodedText $messageSortTime)'>
   <div class='speaker-row'>
-    <span class='speaker-block'><span class='speaker-name'>From: $(ConvertTo-HtmlEncodedText $senderLine)</span><span class='speaker-context'>To: $(ConvertTo-HtmlEncodedText $record.To) • Cc: $(ConvertTo-HtmlEncodedText $record.Cc) • Folder: $(ConvertTo-HtmlEncodedText $record.FolderPath)</span></span>
+    <span class='speaker-block'><span class='speaker-name'>From: $(ConvertTo-HtmlEncodedText $senderLine)</span><span class='speaker-context'>To: $(ConvertTo-HtmlEncodedText $record.To) • Cc: $(ConvertTo-HtmlEncodedText $record.Cc) • Folder: $(ConvertTo-HtmlEncodedText $folderLeaf)</span></span>
     <span class='message-time'>$(ConvertTo-HtmlEncodedText $timeText)</span>
   </div>
   <div class='message-body'>$bodyHtml</div>
@@ -1782,12 +1833,20 @@ function Write-EmailHtmlReport {
 
     $allParticipants = @($participantSet | Sort-Object)
     $allFolders = @($folderSet | Sort-Object)
-    $participantOptions = @(foreach ($participant in $allParticipants) { Format-ParticipantOptionHtml -Participant $participant -DefaultParticipants @() })
     $folderOptions = @(foreach ($folder in $allFolders) { Format-FolderOptionHtml -FolderPath $folder })
     $folderSummaryRows = @(
         $sorted | Group-Object FolderPath | Sort-Object Name | ForEach-Object {
-            '<tr><td>{0}</td><td>{1}</td></tr>' -f (ConvertTo-HtmlEncodedText $_.Name), $_.Count
+            $leaf = Get-EmailFolderLeafLabel -FolderPath $_.Name
+            '<tr><td title="{0}">{1}</td><td>{2}</td></tr>' -f (ConvertTo-HtmlEncodedText $_.Name), (ConvertTo-HtmlEncodedText $leaf), $_.Count
         }
+    )
+    $topSenderOptions = @(
+        $sorted |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.SenderDisplay) } |
+            Group-Object SenderDisplay |
+            Sort-Object Count -Descending |
+            Select-Object -First 20 |
+            ForEach-Object { Format-TopSenderOptionHtml -SenderDisplay $_.Name -MessageCount $_.Count }
     )
 
     $groups = [ordered]@{}
@@ -1806,7 +1865,7 @@ function Write-EmailHtmlReport {
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
     try {
-        Write-EmailReportHeader -Writer $writer -PstItem $PstItem -ConversationCount $groups.Count -SortedRecords $sorted -AllParticipants $allParticipants -AllFolders $allFolders -ParticipantOptions $participantOptions -FolderOptions $folderOptions -FolderSummaryRows $folderSummaryRows
+        Write-EmailReportHeader -Writer $writer -PstItem $PstItem -ConversationCount $groups.Count -SortedRecords $sorted -AllParticipants $allParticipants -AllFolders $allFolders -FolderOptions $folderOptions -FolderSummaryRows $folderSummaryRows -TopSenderOptions $topSenderOptions
         $senderClasses = @{}
         $nextSenderIndex = 0
         $writtenGroups = 0
