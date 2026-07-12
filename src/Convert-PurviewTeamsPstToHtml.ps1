@@ -1357,7 +1357,8 @@ function Format-FolderOptionHtml {
 
     $folderValue = if ([string]::IsNullOrWhiteSpace($FolderPath)) { '(unknown folder)' } else { $FolderPath }
     $folderLabel = Get-EmailFolderLeafLabel -FolderPath $FolderPath
-    return "<label class='folder-option' title='$(ConvertTo-HtmlEncodedText $folderValue)'><input type='checkbox' class='folder-check' value='$(ConvertTo-HtmlEncodedText $folderValue)'/> <span>$(ConvertTo-HtmlEncodedText $folderLabel)</span></label>"
+    # ponytail: checked on load; JS treats none-checked the same as all-checked (show all)
+    return "<label class='folder-option' title='$(ConvertTo-HtmlEncodedText $folderValue)'><input type='checkbox' class='folder-check' value='$(ConvertTo-HtmlEncodedText $folderValue)' checked='checked'/> <span>$(ConvertTo-HtmlEncodedText $folderLabel)</span></label>"
 }
 
 function Format-TopSenderOptionHtml {
@@ -1375,6 +1376,7 @@ function Get-EmailReportCss {
 .folder-filter .folder-box { max-height: 32vh; overflow: auto; border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: #fbfcff; display: grid; grid-template-columns: 1fr; gap: 5px; }
 .folder-option { display: flex; gap: 8px; align-items: center; padding: 6px 7px; border-radius: 9px; cursor: pointer; font-size: .92rem; font-weight: 700; color: #334155; }
 .folder-option:hover { background: #eef3ff; }
+.folder-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
 .email-summary { margin-top: 10px; }
 .email-summary summary { cursor: pointer; font-weight: 800; color: #334155; }
 .email-summary .folder-box { border: 0; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; max-height: 24vh; }
@@ -1399,6 +1401,8 @@ function Get-EmailReportScript {
     return @'
 (function () {
   const folderChecks = Array.from(document.querySelectorAll('.folder-check'));
+  const selectAllFoldersBtn = document.getElementById('selectAllFoldersBtn');
+  const clearFoldersBtn = document.getElementById('clearFoldersBtn');
   const peopleSearch = document.getElementById('peopleSearch');
   const topSenderButtons = Array.from(document.querySelectorAll('.top-sender'));
   const startDateFilter = document.getElementById('startDateFilter');
@@ -1408,6 +1412,7 @@ function Get-EmailReportScript {
   const conversations = Array.from(document.querySelectorAll('.conversation'));
   const resultCount = document.getElementById('resultCount');
   const totalConversations = conversations.length;
+  const folderCount = folderChecks.length;
   let totalMessages = 0;
   let messagesCached = false;
   let lastSortOrder = sortOrder ? (sortOrder.value || 'newestFirst') : 'newestFirst';
@@ -1441,8 +1446,12 @@ function Get-EmailReportScript {
     if (endDate && date > endDate) return false;
     return true;
   }
+  // Checked folders only; none checked OR all checked => show every folder (same as no folder filter).
+  function folderFilterActive(selectedFolders) {
+    return selectedFolders.length > 0 && selectedFolders.length < folderCount;
+  }
   function matchesFolder(conversation, selectedFolders) {
-    if (selectedFolders.length === 0) return true;
+    if (!folderFilterActive(selectedFolders)) return true;
     return selectedFolders.some(folder => getFolders(conversation).includes(folder));
   }
   function matchesPeople(conversation, query) {
@@ -1484,7 +1493,7 @@ function Get-EmailReportScript {
     const peopleQuery = peopleSearch ? peopleSearch.value.trim() : '';
     const startDate = startDateFilter ? startDateFilter.value : '';
     const endDate = endDateFilter ? endDateFilter.value : '';
-    const filtersActive = selectedFolders.length > 0 || !!peopleQuery || !!startDate || !!endDate;
+    const filtersActive = folderFilterActive(selectedFolders) || !!peopleQuery || !!startDate || !!endDate;
 
     if (!filtersActive) {
       conversations.forEach(conversation => {
@@ -1545,7 +1554,14 @@ function Get-EmailReportScript {
     filterTimer = setTimeout(applyFilters, 150);
   }
 
+  function setAllFolders(checked) {
+    folderChecks.forEach(c => { c.checked = checked; });
+    applyFilters();
+  }
+
   folderChecks.forEach(c => c.addEventListener('change', applyFilters));
+  if (selectAllFoldersBtn) selectAllFoldersBtn.addEventListener('click', () => setAllFolders(true));
+  if (clearFoldersBtn) clearFoldersBtn.addEventListener('click', () => setAllFolders(false));
   if (peopleSearch) {
     peopleSearch.addEventListener('input', scheduleFilters);
     peopleSearch.addEventListener('search', applyFilters);
@@ -1637,11 +1653,14 @@ $css
         <h2>Choose folders and people</h2>
         <span id='resultCount' class='result-count'></span>
       </div>
-      <p class='filter-help'>Leave folders unchecked and the people search empty to show everything. Type a name or address to narrow threads.</p>
+      <p class='filter-help'>Folders start checked (show all). Uncheck folders to hide them. If none are checked, everything is shown. Type a name or address to narrow by people.</p>
       <details class='email-summary folder-summary' open='open'>
         <summary>Folders</summary>
+        <div class='folder-actions'>
+          <button type='button' class='secondary' id='selectAllFoldersBtn'>Select all</button>
+          <button type='button' class='secondary' id='clearFoldersBtn'>Clear</button>
+        </div>
         <div id='folderBox' class='folder-box'>
-          <label class='folder-option'><input type='checkbox' id='selectAllFolders' disabled='disabled' hidden='hidden'/> <span>All folders are optional</span></label>
 $($FolderOptions -join "`n")
         </div>
       </details>
@@ -1651,7 +1670,7 @@ $($FolderOptions -join "`n")
         <input id='peopleSearch' type='search' placeholder='Name or email address' autocomplete='off'/>
       </div>
 $topSendersBlock
-      <div class='email-note'>Message bodies are HTML-encoded for safe review. Folder checkboxes keep the full path in their value; labels show the leaf folder name. Full folder paths remain in each message's Details.</div>
+      <div class='email-note'>Message bodies are HTML-encoded for safe review. Folder labels show the leaf name (hover for full path); matching uses the full path. Full paths also appear in each message's Details.</div>
       <details class='folder-summary'>
         <summary>Folder summary</summary>
         <table>

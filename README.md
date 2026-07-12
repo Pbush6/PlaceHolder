@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery Teams PST export into a searchable, filterable HTML conversation report on Windows.
 
-**Current version:** 1.0.33.1  
+**Current version:** 1.0.33.2  
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -65,7 +65,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.33.1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.33.2
 ```
 
 Outputs:
@@ -100,6 +100,11 @@ Expect `ItemsExported=4`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `itemR
 | Working copy (source) | `...\Cursor Working Directory\PurviewTeamsPstToHtmlApp` |
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
+
+## Recent changes (2026-07-11)
+
+- Email Folders filter: all folders checked on load; uncheck to hide; none checked = show all (same as all checked). Select all / Clear buttons added. Keeps people search + large-report performance path.
+- Large email HTML open freeze fixed earlier in 1.0.33.1 (no `textContent` indexing).
 
 ## Recent changes (2026-07-09)
 

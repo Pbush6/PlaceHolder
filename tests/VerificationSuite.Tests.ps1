@@ -86,9 +86,12 @@ Describe 'Purview Teams PST to HTML verification suite' {
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'folder-filter'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'peopleSearch'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'conversation-toolbar'
-        (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match "folder-check' value='SamplePst\\Inbox'"
+        (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match "folder-check' value='SamplePst\\Inbox' checked='checked'"
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match '>Inbox<'
+        (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'selectAllFoldersBtn'
+        (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'folderFilterActive'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Not -Match 'participantMatchMode'
+        (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Not -Match 'All folders are optional'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Not -Match "class='summary-card'><div class='label'>Read warnings"
         ([regex]::Matches((Get-Content -LiteralPath $emailReportPath -Raw), "<section class='conversation'")).Count | Should -Be 1
     }
@@ -213,12 +216,12 @@ Describe 'Purview Teams PST to HTML verification suite' {
     }
 
     It 'builds debug and release executables' {
-        $version = '1.0.33.1'
+        $version = '1.0.33.2'
         $result = & $script:invokePwshScriptCapture -FilePath $script:buildScriptPath -Arguments @('-Version', $version)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter_Debug.exe')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter.exe')) | Should -BeTrue
-        $result.StdOut | Should -Match 'built 1.0.33.1'
+        $result.StdOut | Should -Match 'built 1.0.33.2'
     }
 }

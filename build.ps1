@@ -14,7 +14,7 @@ corrupted the embed line).
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '1.0.33.1'
+    [string]$Version = '1.0.33.2'
 )
 
 Set-StrictMode -Version Latest
