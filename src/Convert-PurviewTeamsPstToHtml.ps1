@@ -1389,10 +1389,13 @@ function Get-EmailReportCss {
 .email-note { margin-top: 10px; color: var(--muted); font-size: .9rem; }
 .email-from-line { font-size: .95rem; color: #334155; font-weight: 700; }
 .email-details div { margin: 2px 0; }
+/* Large reports: skip offscreen layout/paint without changing UX. */
+.conversation { content-visibility: auto; contain-intrinsic-size: auto 220px; }
 '@
 }
 
 function Get-EmailReportScript {
+    # ponytail: no textContent indexing — that freezes 20k+ thread / 250MB reports on open
     return @'
 (function () {
   const folderChecks = Array.from(document.querySelectorAll('.folder-check'));
@@ -1404,16 +1407,35 @@ function Get-EmailReportScript {
   const conversationList = document.getElementById('conversationList');
   const conversations = Array.from(document.querySelectorAll('.conversation'));
   const resultCount = document.getElementById('resultCount');
+  const totalConversations = conversations.length;
+  let totalMessages = 0;
+  let messagesCached = false;
+  let lastSortOrder = sortOrder ? (sortOrder.value || 'newestFirst') : 'newestFirst';
+  let filterTimer = 0;
 
   conversations.forEach(conversation => {
-    conversation._searchText = (conversation.textContent || '').replace(/\s+/g, ' ').toLowerCase();
+    conversation._participants = (conversation.dataset.participants || '').toLowerCase();
+    conversation._folders = null;
+    conversation._msgCount = parseInt(conversation.dataset.msgCount || '0', 10) || 0;
+    conversation._sortTimeMs = Date.parse(conversation.dataset.sortTime || '') || 0;
+    conversation._countEl = null;
+    conversation._messages = null;
+    totalMessages += conversation._msgCount;
   });
 
   function selectedValues(checks) { return checks.filter(c => c.checked).map(c => c.value); }
-  function listFromDataset(node, name) { return (node.dataset[name] || '').split('||').map(v => v.trim()).filter(Boolean); }
-  function messageDate(message) { return (message.dataset.date || '').trim(); }
+  function getFolders(conversation) {
+    if (!conversation._folders) {
+      conversation._folders = (conversation.dataset.folder || '').split('||').map(v => v.trim()).filter(Boolean);
+    }
+    return conversation._folders;
+  }
+  function getCountEl(conversation) {
+    if (conversation._countEl === null) conversation._countEl = conversation.querySelector('.conversation-count');
+    return conversation._countEl;
+  }
   function messageInDateRange(message, startDate, endDate) {
-    const date = messageDate(message);
+    const date = (message.dataset.date || '').trim();
     if (!date) return true;
     if (startDate && date < startDate) return false;
     if (endDate && date > endDate) return false;
@@ -1421,25 +1443,40 @@ function Get-EmailReportScript {
   }
   function matchesFolder(conversation, selectedFolders) {
     if (selectedFolders.length === 0) return true;
-    const folders = listFromDataset(conversation, 'folder');
-    return selectedFolders.some(folder => folders.includes(folder));
+    return selectedFolders.some(folder => getFolders(conversation).includes(folder));
   }
   function matchesPeople(conversation, query) {
     if (!query) return true;
-    const needle = query.toLowerCase();
-    const participants = (conversation.dataset.participants || '').toLowerCase();
-    if (participants.includes(needle)) return true;
-    return !!(conversation._searchText && conversation._searchText.includes(needle));
+    return conversation._participants.includes(query.toLowerCase());
   }
-  function sortConversations() {
+  function ensureMessages(conversation) {
+    if (!conversation._messages) {
+      conversation._messages = Array.from(conversation.querySelectorAll('.message-card'));
+      if (!conversation._msgCount) conversation._msgCount = conversation._messages.length;
+    }
+    return conversation._messages;
+  }
+  function ensureAllMessages() {
+    if (messagesCached) return;
+    conversations.forEach(ensureMessages);
+    messagesCached = true;
+  }
+  function setCountText(conversation, text) {
+    const countEl = getCountEl(conversation);
+    if (countEl) countEl.textContent = text;
+  }
+  function setResultCount(visibleConversations, visibleMessages) {
+    if (resultCount) resultCount.textContent = visibleConversations + ' conversations / ' + visibleMessages + ' messages shown';
+  }
+  function sortConversations(force) {
     if (!conversationList || !sortOrder) return;
     const order = sortOrder.value || 'newestFirst';
-    const sorted = conversations.slice().sort((a, b) => {
-      const aTime = Date.parse(a.dataset.sortTime || '') || 0;
-      const bTime = Date.parse(b.dataset.sortTime || '') || 0;
-      return order === 'oldestFirst' ? aTime - bTime : bTime - aTime;
-    });
-    sorted.forEach(conversation => conversationList.appendChild(conversation));
+    if (!force && order === lastSortOrder) return;
+    lastSortOrder = order;
+    const sorted = conversations.slice().sort((a, b) => order === 'oldestFirst' ? a._sortTimeMs - b._sortTimeMs : b._sortTimeMs - a._sortTimeMs);
+    const frag = document.createDocumentFragment();
+    sorted.forEach(conversation => frag.appendChild(conversation));
+    conversationList.appendChild(frag);
   }
 
   function applyFilters() {
@@ -1447,40 +1484,70 @@ function Get-EmailReportScript {
     const peopleQuery = peopleSearch ? peopleSearch.value.trim() : '';
     const startDate = startDateFilter ? startDateFilter.value : '';
     const endDate = endDateFilter ? endDateFilter.value : '';
+    const filtersActive = selectedFolders.length > 0 || !!peopleQuery || !!startDate || !!endDate;
+
+    if (!filtersActive) {
+      conversations.forEach(conversation => {
+        if (conversation.hidden) conversation.hidden = false;
+        if (conversation._messages) {
+          conversation._messages.forEach(message => { if (message.hidden) message.hidden = false; });
+        }
+        setCountText(conversation, conversation._msgCount + ' messages');
+      });
+      sortConversations(false);
+      setResultCount(totalConversations, totalMessages || totalConversations);
+      return;
+    }
+
     let visibleConversations = 0;
     let visibleMessages = 0;
+    const dateFilterActive = !!(startDate || endDate);
 
-    conversations.forEach(conversation => {
-      const conversationMatches = matchesFolder(conversation, selectedFolders) && matchesPeople(conversation, peopleQuery);
-      const messages = Array.from(conversation.querySelectorAll('.message-card'));
-      let conversationVisibleMessages = 0;
-
-      messages.forEach(message => {
-        const showMessage = conversationMatches && messageInDateRange(message, startDate, endDate);
-        message.hidden = !showMessage;
-        if (showMessage) conversationVisibleMessages += 1;
+    if (!dateFilterActive) {
+      conversations.forEach(conversation => {
+        const show = matchesFolder(conversation, selectedFolders) && matchesPeople(conversation, peopleQuery);
+        conversation.hidden = !show;
+        if (conversation._messages) {
+          conversation._messages.forEach(message => { if (message.hidden) message.hidden = false; });
+        }
+        setCountText(conversation, conversation._msgCount + ' messages');
+        if (show) {
+          visibleConversations += 1;
+          visibleMessages += conversation._msgCount;
+        }
       });
+    } else {
+      ensureAllMessages();
+      conversations.forEach(conversation => {
+        const conversationMatches = matchesFolder(conversation, selectedFolders) && matchesPeople(conversation, peopleQuery);
+        const messages = conversation._messages;
+        let conversationVisibleMessages = 0;
+        messages.forEach(message => {
+          const showMessage = conversationMatches && messageInDateRange(message, startDate, endDate);
+          message.hidden = !showMessage;
+          if (showMessage) conversationVisibleMessages += 1;
+        });
+        conversation.hidden = conversationVisibleMessages === 0;
+        setCountText(conversation, conversationVisibleMessages + ' of ' + messages.length + ' messages');
+        if (!conversation.hidden) {
+          visibleConversations += 1;
+          visibleMessages += conversationVisibleMessages;
+        }
+      });
+    }
 
-      conversation.hidden = conversationVisibleMessages === 0;
-      const countEl = conversation.querySelector('.conversation-count');
-      if (countEl) {
-        countEl.textContent = (selectedFolders.length > 0 || peopleQuery || startDate || endDate)
-          ? (conversationVisibleMessages + ' of ' + messages.length + ' messages')
-          : (messages.length + ' messages');
-      }
-      if (!conversation.hidden) {
-        visibleConversations += 1;
-        visibleMessages += conversationVisibleMessages;
-      }
-    });
+    sortConversations(false);
+    setResultCount(visibleConversations, visibleMessages);
+  }
 
-    sortConversations();
-    if (resultCount) resultCount.textContent = visibleConversations + ' conversations / ' + visibleMessages + ' messages shown';
+  function scheduleFilters() {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(applyFilters, 150);
   }
 
   folderChecks.forEach(c => c.addEventListener('change', applyFilters));
   if (peopleSearch) {
-    peopleSearch.addEventListener('input', applyFilters);
+    peopleSearch.addEventListener('input', scheduleFilters);
     peopleSearch.addEventListener('search', applyFilters);
   }
   topSenderButtons.forEach(button => button.addEventListener('click', () => {
@@ -1491,9 +1558,10 @@ function Get-EmailReportScript {
   }));
   if (startDateFilter) startDateFilter.addEventListener('change', applyFilters);
   if (endDateFilter) endDateFilter.addEventListener('change', applyFilters);
-  if (sortOrder) sortOrder.addEventListener('change', applyFilters);
+  if (sortOrder) sortOrder.addEventListener('change', () => { sortConversations(true); applyFilters(); });
 
-  applyFilters();
+  // Defer result-count paint; skip full filter walk when nothing is filtered.
+  requestAnimationFrame(() => setResultCount(totalConversations, totalMessages || totalConversations));
 })();
 '@
 }
@@ -1656,7 +1724,7 @@ function Write-EmailConversationHtml {
     $conversationSortTime = if ($conversationSortRecord -and $conversationSortRecord[0].SortTime) { ([datetime]$conversationSortRecord[0].SortTime).ToString('o') } else { '' }
 
     $Writer.WriteLine(@"
-<section class='conversation' data-folder='$folderData' data-participants='$participantData' data-sort-time='$(ConvertTo-HtmlEncodedText $conversationSortTime)'>
+<section class='conversation' data-folder='$folderData' data-participants='$participantData' data-msg-count='$($GroupMessages.Count)' data-sort-time='$(ConvertTo-HtmlEncodedText $conversationSortTime)'>
   <div class='conversation-header'>
     <div>
       <h2>$(ConvertTo-HtmlEncodedText $conversationTitle)</h2>
