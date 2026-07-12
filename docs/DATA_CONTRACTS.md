@@ -1,6 +1,6 @@
 # Purview Teams PST → HTML — Data Contracts
 
-**Version:** 1.0.33.2  
+**Version:** 1.0.33.3  
 **Last updated:** 2026-07-11
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.

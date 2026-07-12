@@ -1352,11 +1352,12 @@ function Get-EmailFolderLeafLabel {
 
 function Format-FolderOptionHtml {
     param(
-        [Parameter(Mandatory = $true)] [string]$FolderPath
+        [Parameter(Mandatory = $true)] [string]$FolderPath,
+        [Parameter(Mandatory = $true)] [int]$MessageCount
     )
 
     $folderValue = if ([string]::IsNullOrWhiteSpace($FolderPath)) { '(unknown folder)' } else { $FolderPath }
-    $folderLabel = Get-EmailFolderLeafLabel -FolderPath $FolderPath
+    $folderLabel = '{0} ({1})' -f (Get-EmailFolderLeafLabel -FolderPath $FolderPath), $MessageCount
     # ponytail: checked on load; JS treats none-checked the same as all-checked (show all)
     return "<label class='folder-option' title='$(ConvertTo-HtmlEncodedText $folderValue)'><input type='checkbox' class='folder-check' value='$(ConvertTo-HtmlEncodedText $folderValue)' checked='checked'/> <span>$(ConvertTo-HtmlEncodedText $folderLabel)</span></label>"
 }
@@ -1920,7 +1921,15 @@ function Write-EmailHtmlReport {
 
     $allParticipants = @($participantSet | Sort-Object)
     $allFolders = @($folderSet | Sort-Object)
-    $folderOptions = @(foreach ($folder in $allFolders) { Format-FolderOptionHtml -FolderPath $folder })
+    # ponytail: message counts (not conversation counts) for folder filter labels
+    $folderMessageCounts = @{}
+    foreach ($group in @($sorted | Group-Object FolderPath)) {
+        $folderMessageCounts[[string]$group.Name] = $group.Count
+    }
+    $folderOptions = @(foreach ($folder in $allFolders) {
+        $count = if ($folderMessageCounts.ContainsKey($folder)) { [int]$folderMessageCounts[$folder] } else { 0 }
+        Format-FolderOptionHtml -FolderPath $folder -MessageCount $count
+    })
     $folderSummaryRows = @(
         $sorted | Group-Object FolderPath | Sort-Object Name | ForEach-Object {
             $leaf = Get-EmailFolderLeafLabel -FolderPath $_.Name

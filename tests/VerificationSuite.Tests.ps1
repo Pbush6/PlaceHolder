@@ -87,7 +87,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'peopleSearch'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'conversation-toolbar'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match "folder-check' value='SamplePst\\Inbox' checked='checked'"
-        (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match '>Inbox<'
+        (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match '>Inbox \(2\)<'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'selectAllFoldersBtn'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Match 'folderFilterActive'
         (Get-Content -LiteralPath $emailReportPath -Raw) | Should -Not -Match 'participantMatchMode'
@@ -216,12 +216,12 @@ Describe 'Purview Teams PST to HTML verification suite' {
     }
 
     It 'builds debug and release executables' {
-        $version = '1.0.33.2'
+        $version = '1.0.33.3'
         $result = & $script:invokePwshScriptCapture -FilePath $script:buildScriptPath -Arguments @('-Version', $version)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter_Debug.exe')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter.exe')) | Should -BeTrue
-        $result.StdOut | Should -Match 'built 1.0.33.2'
+        $result.StdOut | Should -Match 'built 1.0.33.3'
     }
 }
