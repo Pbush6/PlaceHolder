@@ -14,7 +14,7 @@ $outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $reportPath = Join-Path $outputDirectory 'verify-stop-process-tree.html'
 $logPath = Join-Path $outputDirectory 'verify-stop-process-tree.log'
 $teamsReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Teams.html'
-$emailReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Email.html'
+$emailReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Email.db'
 $teamsLogPath = Join-Path $outputDirectory 'verify-stop-process-tree_Teams.log'
 $emailLogPath = Join-Path $outputDirectory 'verify-stop-process-tree_Email.log'
 

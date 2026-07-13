@@ -15,6 +15,8 @@ public sealed class EmailMessage
     public string BodyText { get; init; } = "";
     public string MessageClass { get; init; } = "";
     public string EntryId { get; init; } = "";
+    public string ConversationId { get; init; } = "";
+    public string ConversationTopic { get; init; } = "";
 }
 
 public sealed record EmailListItem(
@@ -38,3 +40,5 @@ public sealed record EmailQuery(
 public sealed record EmailPage(IReadOnlyList<EmailListItem> Items, long TotalCount);
 
 public sealed record FolderCount(string FolderPath, long Count);
+
+public sealed record EmailImportResult(int InputCount, int ImportedCount, string DatabasePath);

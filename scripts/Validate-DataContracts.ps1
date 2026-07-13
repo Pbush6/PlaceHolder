@@ -69,7 +69,7 @@ try {
     if ($result -notmatch 'TeamsItemsExported=2') { throw 'CONVERSION_RESULT missing expected TeamsItemsExported=2' }
     if ($result -notmatch 'EmailItemsExported=2') { throw 'CONVERSION_RESULT missing expected EmailItemsExported=2' }
     if ($result -notmatch 'TeamsOutputPath=.*_Teams\.html') { throw 'CONVERSION_RESULT missing expected TeamsOutputPath' }
-    if ($result -notmatch 'EmailOutputPath=.*_Email\.html') { throw 'CONVERSION_RESULT missing expected EmailOutputPath' }
+    if ($result -notmatch 'EmailOutputPath=.*_Email\.db') { throw 'CONVERSION_RESULT missing expected EmailOutputPath' }
     if ($result -notmatch 'TeamsLogPath=.*_Teams\.log') { throw 'CONVERSION_RESULT missing expected TeamsLogPath' }
     if ($result -notmatch 'EmailLogPath=.*_Email\.log') { throw 'CONVERSION_RESULT missing expected EmailLogPath' }
 

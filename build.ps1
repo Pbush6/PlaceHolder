@@ -14,7 +14,7 @@ corrupted the embed line).
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '1.0.33.3'
+    [string]$Version = '1.1.0.0'
 )
 
 Set-StrictMode -Version Latest
@@ -73,9 +73,9 @@ Import-Module ps2exe -Force
 $common = @{
     InputFile   = $launcher
     IconFile    = $icon
-    Description = 'Converts Microsoft Purview Teams PST exports into filterable HTML reports'
+    Description = 'Converts Microsoft Purview PST exports into Teams HTML and Email SQLite reports'
     Company     = 'Perfection Learning'
-    Product     = 'Purview Teams PST to HTML Converter'
+    Product     = 'Purview PST Report Converter'
     Copyright   = 'Perfection Learning'
     Version     = $Version
 }

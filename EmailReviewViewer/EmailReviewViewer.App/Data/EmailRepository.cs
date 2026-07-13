@@ -36,12 +36,14 @@ public sealed class EmailRepository(string databasePath)
                 Preview TEXT NOT NULL,
                 BodyText TEXT NOT NULL,
                 MessageClass TEXT NOT NULL,
-                EntryId TEXT NOT NULL
+                EntryId TEXT NOT NULL,
+                ConversationId TEXT NOT NULL DEFAULT '',
+                ConversationTopic TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS IX_EmailMessages_ReceivedUtc ON EmailMessages(ReceivedUtc DESC);
             CREATE INDEX IF NOT EXISTS IX_EmailMessages_SentUtc ON EmailMessages(SentUtc DESC);
             CREATE INDEX IF NOT EXISTS IX_EmailMessages_SenderAddress ON EmailMessages(SenderAddress);
-            CREATE INDEX IF NOT EXISTS IX_EmailMessages_EntryId ON EmailMessages(EntryId);
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_EmailMessages_EntryId ON EmailMessages(EntryId);
             CREATE INDEX IF NOT EXISTS IX_EmailMessages_FolderPath ON EmailMessages(FolderPath);
             CREATE VIRTUAL TABLE IF NOT EXISTS EmailMessagesFts USING fts5(
                 Subject, BodyText, SenderName, SenderAddress, ToRecipients, CcRecipients,
@@ -94,12 +96,14 @@ public sealed class EmailRepository(string databasePath)
         command.CommandText = """
             INSERT INTO EmailMessages (
                 Id, FolderPath, SenderName, SenderAddress, ToRecipients, CcRecipients,
-                Subject, SentUtc, ReceivedUtc, Preview, BodyText, MessageClass, EntryId
+                Subject, SentUtc, ReceivedUtc, Preview, BodyText, MessageClass, EntryId,
+                ConversationId, ConversationTopic
             ) VALUES (
                 $id, $folder, $senderName, $senderAddress, $to, $cc,
-                $subject, $sent, $received, $preview, $body, $class, $entryId
+                $subject, $sent, $received, $preview, $body, $class, $entryId,
+                $conversationId, $conversationTopic
             )
-            ON CONFLICT(Id) DO UPDATE SET
+            ON CONFLICT(EntryId) DO UPDATE SET
                 FolderPath=excluded.FolderPath,
                 SenderName=excluded.SenderName,
                 SenderAddress=excluded.SenderAddress,
@@ -111,14 +115,16 @@ public sealed class EmailRepository(string databasePath)
                 Preview=excluded.Preview,
                 BodyText=excluded.BodyText,
                 MessageClass=excluded.MessageClass,
-                EntryId=excluded.EntryId;
+                ConversationId=excluded.ConversationId,
+                ConversationTopic=excluded.ConversationTopic;
             """;
 
         var parameters = new Dictionary<string, SqliteParameter>();
         foreach (var name in new[]
                  {
                      "$id", "$folder", "$senderName", "$senderAddress", "$to", "$cc", "$subject",
-                     "$sent", "$received", "$preview", "$body", "$class", "$entryId"
+                     "$sent", "$received", "$preview", "$body", "$class", "$entryId",
+                     "$conversationId", "$conversationTopic"
                  })
         {
             parameters[name] = command.Parameters.Add(name, SqliteType.Text);
@@ -139,6 +145,8 @@ public sealed class EmailRepository(string databasePath)
             parameters["$body"].Value = message.BodyText;
             parameters["$class"].Value = message.MessageClass;
             parameters["$entryId"].Value = message.EntryId;
+            parameters["$conversationId"].Value = message.ConversationId;
+            parameters["$conversationTopic"].Value = message.ConversationTopic;
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -215,7 +223,8 @@ public sealed class EmailRepository(string databasePath)
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, FolderPath, SenderName, SenderAddress, ToRecipients, CcRecipients,
-                   Subject, SentUtc, ReceivedUtc, Preview, BodyText, MessageClass, EntryId
+                   Subject, SentUtc, ReceivedUtc, Preview, BodyText, MessageClass, EntryId,
+                   ConversationId, ConversationTopic
             FROM EmailMessages
             WHERE Id = $id;
             """;
@@ -238,7 +247,9 @@ public sealed class EmailRepository(string databasePath)
             Preview = reader.GetString(9),
             BodyText = reader.GetString(10),
             MessageClass = reader.GetString(11),
-            EntryId = reader.GetString(12)
+            EntryId = reader.GetString(12),
+            ConversationId = reader.GetString(13),
+            ConversationTopic = reader.GetString(14)
         };
     }
 

@@ -11,6 +11,7 @@ Describe 'Report path naming' {
     It 'strips Teams and Email suffixes from base' {
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Teams.html' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Email.html' | Should -Be 'LArtley Messages'
+        Get-ReportPathBaseName 'C:\out\LArtley Messages_Email.db' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages.html' | Should -Be 'LArtley Messages'
     }
 
@@ -18,7 +19,7 @@ Describe 'Report path naming' {
         $r = Get-ReportOutputPaths -DisplayPath 'C:\out\LArtley Messages.html' -TeamsReport $true -EmailReport $true
         $r.DisplayPath | Should -Be 'C:\out\LArtley Messages.html'
         $r.TeamsPath | Should -Be 'C:\out\LArtley Messages_Teams.html'
-        $r.EmailPath | Should -Be 'C:\out\LArtley Messages_Email.html'
+        $r.EmailPath | Should -Be 'C:\out\LArtley Messages_Email.db'
     }
 
     It 'Teams only -> display and write _Teams' {
@@ -30,8 +31,8 @@ Describe 'Report path naming' {
 
     It 'Email only -> display and write _Email' {
         $r = Get-ReportOutputPaths -DisplayPath 'C:\out\LArtley Messages_Teams.html' -TeamsReport $false -EmailReport $true
-        $r.DisplayPath | Should -Be 'C:\out\LArtley Messages_Email.html'
-        $r.EmailPath | Should -Be 'C:\out\LArtley Messages_Email.html'
+        $r.DisplayPath | Should -Be 'C:\out\LArtley Messages_Email.db'
+        $r.EmailPath | Should -Be 'C:\out\LArtley Messages_Email.db'
         $r.TeamsPath | Should -BeNullOrEmpty
     }
 
@@ -40,12 +41,12 @@ Describe 'Report path naming' {
             OutputPath = 'C:\out\LArtley Messages.html'
             LogPath = 'C:\out\LArtley Messages.log'
             TeamsOutputPath = 'C:\out\LArtley Messages_Teams.html'
-            EmailOutputPath = 'C:\out\LArtley Messages_Email.html'
+            EmailOutputPath = 'C:\out\LArtley Messages_Email.db'
             TeamsLogPath = 'C:\out\LArtley Messages_Teams.log'
             EmailLogPath = 'C:\out\LArtley Messages_Email.log'
         }
         $w = Get-WritePathsFromResultFields -Fields $fields
-        $w.ReportPaths | Should -Be @('C:\out\LArtley Messages_Teams.html', 'C:\out\LArtley Messages_Email.html')
+        $w.ReportPaths | Should -Be @('C:\out\LArtley Messages_Teams.html', 'C:\out\LArtley Messages_Email.db')
         $w.LogPaths | Should -Be @('C:\out\LArtley Messages_Teams.log', 'C:\out\LArtley Messages_Email.log')
         $w.ReportPaths | Should -Not -Contain 'C:\out\LArtley Messages.html'
         $w.LogPaths | Should -Not -Contain 'C:\out\LArtley Messages.log'

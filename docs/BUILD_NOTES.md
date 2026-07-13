@@ -2,6 +2,14 @@
 
 Generated: 2026-07-03
 
+## Version 1.1.0.0 packaging (2026-07-13)
+
+- Build converter EXEs with `pwsh -File .\build.ps1 -Version 1.1.0.0`.
+- Publish the viewer framework-dependent for win-x64:
+  `dotnet publish .\EmailReviewViewer\EmailReviewViewer.App\EmailReviewViewer.App.csproj -c Release -r win-x64 --self-contained false -o .\EmailReviewViewer\artifacts\publish\win-x64`.
+- Deliver `PurviewTeamsPstToHtmlConverter.exe`, `PurviewTeamsPstToHtmlConverter_Debug.exe`, `README.md`, and the complete published `EmailReviewViewer\` folder together.
+- The launcher resolves `EmailReviewViewer\EmailReviewViewer.App.exe` beside the converter and fails with an actionable message when Email output is selected but the viewer is missing.
+
 ## Cursor working-copy maintenance update (2026-07-08)
 
 This build-notes file originally described the Hermes working-copy/output flow and is now partially historical.

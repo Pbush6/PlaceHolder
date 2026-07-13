@@ -38,7 +38,7 @@
         "prefix": { "const": "CONVERSION_STAGE" },
         "Stage": {
           "type": "string",
-          "enum": ["FinishedReading", "PreparingReport", "WritingReport", "Finalizing", "Detaching", "ReportWritten"]
+          "enum": ["FinishedReading", "PreparingReport", "WritingReport", "Finalizing", "ImportingEmailDatabase", "Detaching", "ReportWritten"]
         },
         "Written": { "type": "integer", "minimum": 0 },
         "Total": { "type": "integer", "minimum": 0 }

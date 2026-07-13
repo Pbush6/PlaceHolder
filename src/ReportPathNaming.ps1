@@ -22,23 +22,26 @@ function Get-ReportOutputPaths {
     }
     $dir = [IO.Path]::GetDirectoryName($DisplayPath)
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
-    $ext = [IO.Path]::GetExtension($DisplayPath)
-    if ([string]::IsNullOrWhiteSpace($ext)) { $ext = '.html' }
+    $inputExt = [IO.Path]::GetExtension($DisplayPath)
+    $isLogPath = $inputExt -in @('.log', '.txt')
+    $teamsExt = if ($isLogPath) { $inputExt } else { '.html' }
+    $emailExt = if ($isLogPath) { $inputExt } else { '.db' }
+    $displayExt = if ($isLogPath) { $inputExt } else { '.html' }
     $base = Get-ReportPathBaseName -FilePath $DisplayPath
     $teamsPath = $null
     $emailPath = $null
     $display = $null
     if ($TeamsReport -and $EmailReport) {
-        $display = Join-Path $dir ($base + $ext)
-        $teamsPath = Join-Path $dir ($base + '_Teams' + $ext)
-        $emailPath = Join-Path $dir ($base + '_Email' + $ext)
+        $display = Join-Path $dir ($base + $displayExt)
+        $teamsPath = Join-Path $dir ($base + '_Teams' + $teamsExt)
+        $emailPath = Join-Path $dir ($base + '_Email' + $emailExt)
     }
     elseif ($TeamsReport) {
-        $display = Join-Path $dir ($base + '_Teams' + $ext)
+        $display = Join-Path $dir ($base + '_Teams' + $teamsExt)
         $teamsPath = $display
     }
     else {
-        $display = Join-Path $dir ($base + '_Email' + $ext)
+        $display = Join-Path $dir ($base + '_Email' + $emailExt)
         $emailPath = $display
     }
     [pscustomobject]@{ DisplayPath = $display; TeamsPath = $teamsPath; EmailPath = $emailPath }

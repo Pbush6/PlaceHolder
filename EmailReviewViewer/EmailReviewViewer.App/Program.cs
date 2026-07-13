@@ -12,6 +12,10 @@ internal static class Program
     {
         try
         {
+            if (args.FirstOrDefault()?.Equals("--import", StringComparison.OrdinalIgnoreCase) == true)
+                return await ImportAsync(args);
+            if (args.FirstOrDefault()?.Equals("--inspect", StringComparison.OrdinalIgnoreCase) == true)
+                return await InspectAsync(args);
             if (args.FirstOrDefault()?.Equals("--generate", StringComparison.OrdinalIgnoreCase) == true)
                 return await GenerateAsync(args);
             if (args.FirstOrDefault()?.Equals("--benchmark", StringComparison.OrdinalIgnoreCase) == true)
@@ -52,6 +56,53 @@ internal static class Program
             Console.Error.WriteLine(exception);
             return 1;
         }
+    }
+
+    private static async Task<int> ImportAsync(string[] args)
+    {
+        var inputPath = GetPath(args, 1);
+        var databasePath = GetOptionPath(args, "--database");
+        var expectedText = GetOption(args, "--expected-count");
+        int? expectedCount = expectedText is null
+            ? null
+            : int.TryParse(expectedText, out var parsed) && parsed >= 0
+                ? parsed
+                : throw new ArgumentException("--expected-count must be a non-negative integer.");
+        var result = await EmailNdjsonImporter.ImportAsync(inputPath, databasePath, expectedCount);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            mode = "import",
+            inputPath,
+            databasePath = result.DatabasePath,
+            inputCount = result.InputCount,
+            importedCount = result.ImportedCount
+        }));
+        return 0;
+    }
+
+    private static async Task<int> InspectAsync(string[] args)
+    {
+        var databasePath = GetPath(args, 1);
+        var keyword = args.Length > 2 ? args[2] : "phoenix";
+        var repository = new EmailRepository(databasePath);
+        var all = await repository.SearchPageAsync(new EmailQuery(Limit: 1));
+        var folders = await repository.GetFolderCountsAsync();
+        var matches = await repository.SearchPageAsync(new EmailQuery(Keyword: keyword, Limit: 1));
+        var detail = matches.Items.Count > 0
+            ? await repository.GetByIdAsync(matches.Items[0].Id)
+            : null;
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            mode = "inspect",
+            databasePath,
+            rowCount = all.TotalCount,
+            folderCount = folders.Count,
+            folders,
+            keyword,
+            keywordHits = matches.TotalCount,
+            detailBody = detail?.BodyText
+        }, JsonOptions));
+        return 0;
     }
 
     private static async Task<int> GenerateAsync(string[] args)
@@ -126,6 +177,17 @@ internal static class Program
         if (args.Length <= index || string.IsNullOrWhiteSpace(args[index]))
             throw new ArgumentException("A database path is required.");
         return Path.GetFullPath(args[index]);
+    }
+
+    private static string GetOptionPath(string[] args, string name) =>
+        Path.GetFullPath(GetOption(args, name)
+            ?? throw new ArgumentException($"{name} requires a path."));
+
+    private static string? GetOption(string[] args, string name)
+    {
+        var index = Array.FindIndex(args,
+            argument => argument.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };

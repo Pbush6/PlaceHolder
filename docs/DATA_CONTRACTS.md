@@ -1,7 +1,7 @@
 # Purview Teams PST → HTML — Data Contracts
 
-**Version:** 1.0.33.3  
-**Last updated:** 2026-07-11
+**Version:** 1.1.0.0
+**Last updated:** 2026-07-13
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
 
@@ -12,7 +12,7 @@ All lines are single-line, pipe-separated `Key=Value` fields. Optional `RunId=<3
 | Prefix | When emitted | Required fields |
 |--------|--------------|-----------------|
 | `CONVERSION_PROGRESS` | During PST scan | `ItemsAttempted`, `ItemsExported`, `FoldersScanned`, `ItemReadFailures`, `ElapsedSeconds`, `RatePerMinute`, `FolderPath` |
-| `CONVERSION_STAGE` | Report lifecycle | `Stage` (+ optional `Written`, `Total` for `WritingReport`) |
+| `CONVERSION_STAGE` | Report lifecycle | `Stage` (+ optional `Written`, `Total` for `WritingReport`); includes `ImportingEmailDatabase` |
 | `CONVERSION_RESULT` | Success only | `OutputPath`, `LogPath`, `ItemsExported`, `ItemReadFailures`, `AttachmentReadFailures`, `SubfolderScanFailures` + optional `TeamsOutputPath`, `EmailOutputPath`, `TeamsLogPath`, `EmailLogPath`, `TeamsItemsExported`, `EmailItemsExported` |
 | `CONVERSION_ERROR` | Fatal failure (before throw) | `ExitCode`, `Message` (max 500 chars, no CR/LF/pipes) |
 
@@ -48,15 +48,26 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 | `BodyText` | string | HTML-encoded at write time |
 | `AttachmentsHtml` | string | Pre-rendered table HTML |
 
-## 4. HTML report contract (grep-validated)
+## 4. Output report contracts
 
 **Teams report** required DOM markers: `participantMatchMode`, `startDateFilter`, `endDateFilter`, `sortOrder`, `conversation-toolbar`, `hero-credit` containing `By Patrick Bush`.
 
-**Email report** required DOM markers: `peopleSearch`, `folder-filter`, `data-folder`, `startDateFilter`, `endDateFilter`, `sortOrder`, `conversation-toolbar`, `hero-credit` containing `By Patrick Bush`. Folder filter checkboxes keep the full path in `value` and show the leaf folder name in the label. Read warnings are omitted from the summary strip; when counts are greater than zero they appear as a collapsed `read-warnings` block in the left panel footer.
+**Email report:** SQLite database named `Base_Email.db`, with `EmailMessages`, `EmailMessagesFts`, indexes, and FTS maintenance triggers. The viewer pages metadata and loads a body only when selected.
 
 All user-controlled text passes `ConvertTo-HtmlEncodedText`.
 
-## 5. Launcher ↔ child process
+## 5. Email NDJSON import
+
+UTF-8 without BOM, one JSON object per physical line. Required data fields are `FolderPath`, `SenderName`, `SenderAddress`, `ToRecipients`, `CcRecipients`, `Subject`, `SentUtc`, `ReceivedUtc`, `Preview`, `BodyText`, `MessageClass`, `EntryId`, `ConversationId`, and `ConversationTopic`.
+
+- Date values are ISO-8601 with timezone offset and are normalized to UTC by the importer.
+- Preview is the first non-empty body line, bounded to 500 characters.
+- `EntryId` is the unique duplicate key; missing values receive a deterministic SHA-256 fallback.
+- Import writes `<output>.importing`, validates final row count, then replaces the destination.
+- Staging NDJSON is removed only after importer exit code 0; failures log and retain its exact path.
+- Attachment summaries are deferred in 1.1.0.0.
+
+## 6. Launcher ↔ child process
 
 | Concern | Contract |
 |---------|----------|
@@ -65,16 +76,16 @@ All user-controlled text passes `ConvertTo-HtmlEncodedText`.
 | Stdout | Async queue (GUI) or synchronous drain (NoGui) |
 | Stderr | Concurrent drain (NoGui) to prevent pipe deadlock |
 | Cancel | `taskkill /T /F` + Job Object `KILL_ON_JOB_CLOSE` |
-| Success | ExitCode 0 **and** report file exists on disk |
+| Success | ExitCode 0 **and** every requested typed report file exists on disk |
 
-## 6. JSON state files
+## 7. JSON state files
 
 | File | Schema | Location |
 |------|--------|----------|
 | `inflight.json` | `inflight-state.schema.json` | `.cursor/state/` per workspace |
 | `index.json` | `memory-index.schema.json` | `Cursor Output/Curt-Memory/` |
 
-## 7. Version alignment
+## 8. Version alignment
 
 | Source | Expected |
 |--------|----------|

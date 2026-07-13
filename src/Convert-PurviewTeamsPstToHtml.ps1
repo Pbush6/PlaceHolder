@@ -492,23 +492,26 @@ function Get-ReportOutputPaths {
     }
     $dir = [IO.Path]::GetDirectoryName($DisplayPath)
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
-    $ext = [IO.Path]::GetExtension($DisplayPath)
-    if ([string]::IsNullOrWhiteSpace($ext)) { $ext = '.html' }
+    $inputExt = [IO.Path]::GetExtension($DisplayPath)
+    $isLogPath = $inputExt -in @('.log', '.txt')
+    $teamsExt = if ($isLogPath) { $inputExt } else { '.html' }
+    $emailExt = if ($isLogPath) { $inputExt } else { '.db' }
+    $displayExt = if ($isLogPath) { $inputExt } else { '.html' }
     $base = Get-ReportPathBaseName -FilePath $DisplayPath
     $teamsPath = $null
     $emailPath = $null
     $display = $null
     if ($TeamsReport -and $EmailReport) {
-        $display = Join-Path $dir ($base + $ext)
-        $teamsPath = Join-Path $dir ($base + '_Teams' + $ext)
-        $emailPath = Join-Path $dir ($base + '_Email' + $ext)
+        $display = Join-Path $dir ($base + $displayExt)
+        $teamsPath = Join-Path $dir ($base + '_Teams' + $teamsExt)
+        $emailPath = Join-Path $dir ($base + '_Email' + $emailExt)
     }
     elseif ($TeamsReport) {
-        $display = Join-Path $dir ($base + '_Teams' + $ext)
+        $display = Join-Path $dir ($base + '_Teams' + $teamsExt)
         $teamsPath = $display
     }
     else {
-        $display = Join-Path $dir ($base + '_Email' + $ext)
+        $display = Join-Path $dir ($base + '_Email' + $emailExt)
         $emailPath = $display
     }
     [pscustomobject]@{ DisplayPath = $display; TeamsPath = $teamsPath; EmailPath = $emailPath }
@@ -1829,7 +1832,7 @@ function Get-SampleRecord {
             [pscustomobject]@{ SortTime = [datetime]'2024-01-01T09:01:00'; FolderPath = 'SamplePst\TeamsMessagesData'; Subject = 'Sample Teams chat'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "Linda Artley || Torey Page`nSample Teams chat`nSamplePst\TeamsMessagesData"; ConversationTitle = 'Sample Teams chat'; SentOn = [datetime]'2024-01-01T09:01:00'; ReceivedTime = [datetime]'2024-01-01T09:01:05'; CreationTime = [datetime]'2024-01-01T09:01:05'; EntryId = 'sample-entry-2'; BodyText = "Thanks.`nThis message has two lines."; AttachmentsHtml = "<div class='attachments'><strong>Attachments:</strong><table><tbody><tr><td>sample.pdf</td><td>sample.pdf</td><td>1234</td></tr></tbody></table></div>" }
         )
         Email = @(
-            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Budget'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "id:sample-conversation-1"; ConversationTitle = 'Budget'; ConversationTopic = 'Budget planning'; ConversationId = 'sample-conversation-1'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Budget attached.'; AttachmentsHtml = '' }
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Budget'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "id:sample-conversation-1"; ConversationTitle = 'Budget'; ConversationTopic = 'Budget planning'; ConversationId = 'sample-conversation-1'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Budget phoenix attached.'; AttachmentsHtml = '' }
             [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:05:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Re: Budget'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "id:sample-conversation-1"; ConversationTitle = 'Budget'; ConversationTopic = 'Budget planning'; ConversationId = 'sample-conversation-1'; SentOn = [datetime]'2024-01-01T10:05:00'; ReceivedTime = [datetime]'2024-01-01T10:05:05'; CreationTime = [datetime]'2024-01-01T10:05:05'; EntryId = 'sample-entry-4'; BodyText = 'Thanks, I will review it.'; AttachmentsHtml = '' }
         )
     }
@@ -1982,6 +1985,92 @@ function Write-EmailHtmlReport {
     }
 }
 
+function Resolve-EmailViewerExecutable {
+    $candidates = @(
+        $env:PURVIEW_EMAIL_VIEWER_PATH,
+        (Join-Path $PSScriptRoot '..\EmailReviewViewer\EmailReviewViewer.App.exe'),
+        (Join-Path $PSScriptRoot '..\EmailReviewViewer\EmailReviewViewer.App\bin\Release\net8.0-windows\EmailReviewViewer.App.exe'),
+        (Join-Path $PSScriptRoot '..\EmailReviewViewer\artifacts\publish\win-x64\EmailReviewViewer.App.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and
+            (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return [IO.Path]::GetFullPath($candidate)
+        }
+    }
+    throw 'Email report requires EmailReviewViewer.App.exe. Keep the EmailReviewViewer folder beside the converter, or build/publish EmailReviewViewer from source.'
+}
+
+function ConvertTo-EmailImportDate {
+    param([AllowNull()][object]$Value)
+    if (Test-MissingDate $Value) { return $null }
+    return ([datetime]$Value).ToUniversalTime().ToString('o')
+}
+
+function Write-EmailDatabase {
+    param(
+        [Parameter(Mandatory = $true)][object]$Records,
+        [Parameter(Mandatory = $true)][string]$DatabasePath
+    )
+
+    $viewerPath = Resolve-EmailViewerExecutable
+    $stagingPath = $DatabasePath + '.staging.ndjson'
+    $writer = [IO.StreamWriter]::new($stagingPath, $false, [Text.UTF8Encoding]::new($false))
+    try {
+        foreach ($record in @($Records)) {
+            $preview = @(([string]$record.BodyText -split '\r?\n') |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -First 1)
+            $previewText = if ($preview.Count) { [string]$preview[0] } else { '' }
+            if ($previewText.Length -gt 500) { $previewText = $previewText.Substring(0, 500) }
+            $payload = [ordered]@{
+                FolderPath       = [string]$record.FolderPath
+                SenderName       = [string]$record.SenderName
+                SenderAddress    = [string]$record.SenderEmail
+                ToRecipients     = [string]$record.To
+                CcRecipients     = [string]$record.Cc
+                Subject          = [string]$record.Subject
+                SentUtc          = ConvertTo-EmailImportDate $record.SentOn
+                ReceivedUtc      = ConvertTo-EmailImportDate $record.ReceivedTime
+                Preview          = $previewText
+                BodyText         = [string]$record.BodyText
+                MessageClass     = [string]$record.MessageClass
+                EntryId          = [string]$record.EntryId
+                ConversationId   = [string]$record.ConversationId
+                ConversationTopic = [string]$record.ConversationTopic
+            }
+            $writer.WriteLine(($payload | ConvertTo-Json -Compress -Depth 3))
+        }
+    }
+    finally {
+        $writer.Dispose()
+    }
+
+    Write-ReportLog "Importing Email SQLite database from staging file: $stagingPath"
+    Write-ConversionStage -Stage 'ImportingEmailDatabase'
+    $psi = [Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $viewerPath
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    foreach ($argument in @('--import', $stagingPath, '--database', $DatabasePath, '--expected-count', [string]@($Records).Count)) {
+        [void]$psi.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($psi)
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.Result
+    $stderr = $stderrTask.Result
+    if ($process.ExitCode -ne 0) {
+        throw "Email database import failed with exit code $($process.ExitCode). Staging file retained at $stagingPath. $stderr"
+    }
+    Remove-Item -LiteralPath $stagingPath -Force
+    Write-ReportLog "Email database importer completed: $stdout"
+}
+
 function Invoke-ReportConversion {
     if (-not $TeamsReport -and -not $EmailReport) {
         $msg = 'At least one report type must be selected (TeamsReport and/or EmailReport).'
@@ -2116,9 +2205,9 @@ function Invoke-ReportConversion {
             Write-ReportLog "HTML report written to $script:TeamsOutputPath"
         }
         if ($EmailReport) {
-            Write-ReportLog 'Writing Email HTML report.'
-            Write-EmailHtmlReport -Records $emailRecords.ToArray() -PstItem $pstItem -ReportPath $script:EmailOutputPath
-            Write-ReportLog "HTML report written to $script:EmailOutputPath"
+            Write-ReportLog 'Writing Email SQLite database.'
+            Write-EmailDatabase -Records $emailRecords.ToArray() -DatabasePath $script:EmailOutputPath
+            Write-ReportLog "Email SQLite database written to $script:EmailOutputPath"
         }
         Write-ConversionStage -Stage 'ReportWritten'
         Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}|TeamsOutputPath={7}|EmailOutputPath={8}|TeamsLogPath={9}|EmailLogPath={10}|TeamsItemsExported={11}|EmailItemsExported={12}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $script:TeamsOutputPath, $script:EmailOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:Stats.TeamsItemsExported, $script:Stats.EmailItemsExported)

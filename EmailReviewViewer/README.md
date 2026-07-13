@@ -1,6 +1,6 @@
-# Email Review Viewer prototype
+# Email Review Viewer
 
-Standalone, offline Windows viewer proof of concept for large email collections. It does not read PST files and does not change the existing PowerShell converter.
+Standalone, offline Windows viewer for Email SQLite databases produced by the Purview PST Report Converter. It does not read PST files itself.
 
 ## Requirements
 
@@ -24,6 +24,16 @@ $dotnet = "$env:USERPROFILE\.dotnet\dotnet.exe"
 ```
 
 The generator uses a fixed seed and writes realistic senders, recipients, dates, subjects, previews, and bodies. Re-running it replaces the sample database.
+
+## Import converter NDJSON
+
+```powershell
+EmailReviewViewer.App.exe --import input.ndjson --database output.db --expected-count 25000
+```
+
+Input is UTF-8 NDJSON with one object per line. Import builds SQLite/FTS5 in `output.db.importing`, validates the final row count when requested, and only then replaces `output.db`. Malformed input or count mismatch leaves the original database unchanged. `EntryId` is the duplicate key; a deterministic SHA-256 fallback is generated when it is missing.
+
+Dates are accepted as ISO-8601 values with offsets and stored as UTC round-trip strings. The contract includes folder, sender, To/Cc, subject, sent/received time, bounded preview, full body, message class, Entry ID, conversation ID, and conversation topic. Attachment summaries are deferred in 1.1.0.0.
 
 ## Run the benchmark
 
@@ -65,7 +75,7 @@ From a published deliverable, keep `sample-emails.db` beside `EmailReviewViewer.
 
 ## Architecture
 
-- `EmailReviewViewer.App`: .NET 8 WinForms application and command-line sample/benchmark modes.
+- `EmailReviewViewer.App`: .NET 8 WinForms application plus import, inspect, sample, and benchmark modes.
 - `EmailRepository`: parameterized SQLite access, schema creation, FTS5 search, folder counts, paged list queries, and single-message detail retrieval.
 - `EmailMessages`: metadata, preview, and body storage with date/sender/folder indexes.
 - `EmailMessagesFts`: external-content FTS5 index over subject, body, sender, and recipients, maintained by triggers.
@@ -73,9 +83,9 @@ From a published deliverable, keep `sample-emails.db` beside `EmailReviewViewer.
 - Filter edits are debounced; superseded page queries are cancelled.
 - `EmailReviewViewer.Tests`: schema, FTS, date/party filter, paging, and detail retrieval tests.
 
-## Prototype acceptance checklist
+## Acceptance checklist
 
-- [x] Standalone desktop viewer; converter integration intentionally deferred.
+- [x] Standalone desktop viewer integrated with converter NDJSON import.
 - [x] Offline SQLite + FTS5 storage and search.
 - [x] Dense list with date, From, To, subject, and preview.
 - [x] Reading pane retrieves one full body on selection.
