@@ -3,3 +3,8 @@ build/
 .superpowers/
 test-output/*.html
 test-output/*.log
+EmailReviewViewer/**/bin/
+EmailReviewViewer/**/obj/
+EmailReviewViewer/artifacts/
+EmailReviewViewer/sample-emails.db*
+*.csproj.user
