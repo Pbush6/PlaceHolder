@@ -173,19 +173,46 @@ function Resolve-PowerShell7Path {
     throw 'PowerShell 7 is required for this converter, but it was not found on this computer. Install PowerShell 7 from Microsoft, then run the converter again.'
 }
 
-function Resolve-EmailViewerPath {
-    $baseDirectory = [AppContext]::BaseDirectory
-    $candidates = [System.Collections.Generic.List[string]]::new()
-    foreach ($candidate in @(
-        $env:PURVIEW_EMAIL_VIEWER_PATH,
-        (Join-Path $baseDirectory 'EmailReviewViewer\EmailReviewViewer.App.exe')
-    )) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate)) { $candidates.Add($candidate) }
+function Get-CurrentExecutablePath {
+    try {
+        $processPathProperty = [Environment].GetProperty('ProcessPath')
+        if ($processPathProperty) {
+            $path = [string]$processPathProperty.GetValue($null)
+            if (-not [string]::IsNullOrWhiteSpace($path)) { return $path }
+        }
     }
-    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-        $candidates.Add((Join-Path $PSScriptRoot 'EmailReviewViewer\EmailReviewViewer.App.exe'))
-        $candidates.Add((Join-Path $PSScriptRoot '..\EmailReviewViewer\EmailReviewViewer.App\bin\Release\net8.0-windows\EmailReviewViewer.App.exe'))
-        $candidates.Add((Join-Path $PSScriptRoot '..\EmailReviewViewer\artifacts\publish\win-x64\EmailReviewViewer.App.exe'))
+    catch { }
+    try {
+        return [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    }
+    catch {
+        return ''
+    }
+}
+
+function Resolve-EmailViewerPath {
+    param(
+        [AllowEmptyString()][string]$ProcessPath = (Get-CurrentExecutablePath),
+        [AllowEmptyString()][string]$ScriptDirectory = $PSScriptRoot,
+        [AllowEmptyString()][string]$AppBaseDirectory = ([AppContext]::BaseDirectory)
+    )
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($env:PURVIEW_EMAIL_VIEWER_PATH)) {
+        $candidates.Add($env:PURVIEW_EMAIL_VIEWER_PATH)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ProcessPath)) {
+        $processDirectory = [IO.Path]::GetDirectoryName($ProcessPath)
+        if (-not [string]::IsNullOrWhiteSpace($processDirectory)) {
+            $candidates.Add((Join-Path $processDirectory 'EmailReviewViewer\EmailReviewViewer.App.exe'))
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ScriptDirectory)) {
+        $candidates.Add((Join-Path $ScriptDirectory 'EmailReviewViewer\EmailReviewViewer.App.exe'))
+        $candidates.Add((Join-Path $ScriptDirectory '..\EmailReviewViewer\EmailReviewViewer.App\bin\Release\net8.0-windows\EmailReviewViewer.App.exe'))
+        $candidates.Add((Join-Path $ScriptDirectory '..\EmailReviewViewer\artifacts\publish\win-x64\EmailReviewViewer.App.exe'))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AppBaseDirectory)) {
+        $candidates.Add((Join-Path $AppBaseDirectory 'EmailReviewViewer\EmailReviewViewer.App.exe'))
     }
     foreach ($candidate in $candidates) {
         if (-not [string]::IsNullOrWhiteSpace($candidate) -and
@@ -193,7 +220,7 @@ function Resolve-EmailViewerPath {
             return [IO.Path]::GetFullPath($candidate)
         }
     }
-    throw 'Email report requires EmailReviewViewer\EmailReviewViewer.App.exe beside the converter. Reinstall the complete deliverable or publish EmailReviewViewer from source.'
+    throw "Email report requires EmailReviewViewer\EmailReviewViewer.App.exe. Searched: $($candidates -join '; ')"
 }
 
 function Invoke-EmbeddedConversion {
@@ -714,15 +741,28 @@ function Get-OutlookCleanupWarningFromLog {
 }
 
 function Open-GeneratedReport {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [scriptblock]$LogAction
+    )
     if ([IO.Path]::GetExtension($Path) -ieq '.db') {
-        $psi = [Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName = Resolve-EmailViewerPath
-        $psi.UseShellExecute = $false
-        [void]$psi.ArgumentList.Add($Path)
-        [void][Diagnostics.Process]::Start($psi)
+        $viewerPath = ''
+        try {
+            $viewerPath = Resolve-EmailViewerPath
+            if ($LogAction) { & $LogAction "Opening Email Review Viewer. Viewer: $viewerPath Database: $Path" }
+            $psi = [Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $viewerPath
+            $psi.UseShellExecute = $false
+            $psi.Arguments = ConvertTo-NativeArgumentString -Argument @($Path)
+            [void][Diagnostics.Process]::Start($psi)
+        }
+        catch {
+            $reportedViewerPath = if ([string]::IsNullOrWhiteSpace($viewerPath)) { '(not resolved)' } else { $viewerPath }
+            throw "Email Review Viewer launch failed. Viewer: $reportedViewerPath Database: $Path Error: $($_.Exception.Message)"
+        }
     }
     else {
+        if ($LogAction) { & $LogAction "Opening Teams report in the default browser. Report: $Path" }
         Start-Process -FilePath $Path
     }
 }
@@ -958,6 +998,17 @@ function Start-GuiMode {
     $script:lastReportPaths = @()
     $script:lastLogPaths = @()
     $appendLog = { param([string]$Text) $logText.AppendText($Text + [Environment]::NewLine) }
+    $appendLaunchLog = {
+        param([string]$Text)
+        & $appendLog $Text
+        foreach ($logPath in @($script:lastLogPaths)) {
+            if (-not ($logPath -and (Test-Path -LiteralPath $logPath -PathType Leaf))) { continue }
+            try {
+                Add-Content -LiteralPath $logPath -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text) -Encoding UTF8
+            }
+            catch { }
+        }
+    }
 
     $pstBrowse.Add_Click({
         $dialog = [System.Windows.Forms.OpenFileDialog]::new()
@@ -996,7 +1047,18 @@ function Start-GuiMode {
     $openReportButton.Add_Click({
         foreach ($path in @($script:lastReportPaths)) {
             if (-not ($path -and (Test-Path -LiteralPath $path))) { continue }
-            try { Open-GeneratedReport -Path $path } catch { }
+            try {
+                Open-GeneratedReport -Path $path -LogAction $appendLaunchLog
+            }
+            catch {
+                & $appendLaunchLog $_.Exception.Message
+                [System.Windows.Forms.MessageBox]::Show(
+                    $form,
+                    "$($_.Exception.Message)`n`nThe conversion output is still valid. Use Open Report to retry after checking the viewer files.",
+                    'Could not open report',
+                    'OK',
+                    'Warning') | Out-Null
+            }
         }
     })
     $openLogButton.Add_Click({
@@ -1167,16 +1229,19 @@ function Start-GuiMode {
 
                 Set-ConversionProgress 100 'Conversion completed successfully. Opening reports...'
                 & $appendLog 'Conversion completed successfully.'
-                $reportOpened = $false
+                $openedReports = [System.Collections.Generic.List[string]]::new()
+                $launchWarnings = [System.Collections.Generic.List[string]]::new()
                 foreach ($path in @($script:lastReportPaths)) {
                     if (-not (Test-Path -LiteralPath $path)) { continue }
                     try {
-                        Open-GeneratedReport -Path $path
-                        $reportOpened = $true
-                        & $appendLog "Opened report: $path"
+                        Open-GeneratedReport -Path $path -LogAction $appendLaunchLog
+                        $openedReports.Add($path)
+                        & $appendLaunchLog "Opened report: $path"
                     }
                     catch {
-                        & $appendLog ("Could not open report automatically: " + $_.Exception.Message)
+                        $warning = "Could not open report automatically: $($_.Exception.Message)"
+                        $launchWarnings.Add($warning)
+                        & $appendLaunchLog $warning
                     }
                 }
                 $outlookCleanup = Get-OutlookCleanupWarningFromLog -LogPath ($script:lastLogPaths | Select-Object -First 1)
@@ -1185,11 +1250,11 @@ function Start-GuiMode {
                     $outlookNote = "`n`nOutlook cleanup warning:`n$outlookCleanup"
                 }
                 else { $outlookNote = '' }
-                if ($reportOpened) {
+                if ($launchWarnings.Count -eq 0) {
                     [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReports:`n$($script:lastReportPaths -join "`n")`n`nTeams opened in your browser; Email opened in Email Review Viewer.$outlookNote", 'Conversion complete', 'OK', 'Information') | Out-Null
                 }
                 else {
-                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully.`n`nReports:`n$($script:lastReportPaths -join "`n")`n`nThe report(s) could not be opened automatically; open them manually.$outlookNote", 'Conversion complete', 'OK', 'Information') | Out-Null
+                    [System.Windows.Forms.MessageBox]::Show($form, "Conversion completed successfully, but one or more reports could not be opened automatically.`n`nReports:`n$($script:lastReportPaths -join "`n")`n`n$($launchWarnings -join "`n")`n`nUse Open Report to retry. The conversion output is valid.$outlookNote", 'Conversion complete — open warning', 'OK', 'Warning') | Out-Null
                 }
             }
             catch {

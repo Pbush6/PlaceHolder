@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery PST into a Teams HTML report and/or an Email SQLite database opened by the included desktop viewer.
 
-**Current version:** 1.1.0.0
+**Current version:** 1.1.0.1
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -69,7 +69,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.1.0.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.1.0.1
 ```
 
 Outputs:
@@ -99,6 +99,7 @@ Expect `ItemsExported=4`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `itemR
 - If both are unchecked, the core exits with `CONVERSION_ERROR`.
 - Email records are staged as UTF-8 NDJSON, imported into a temporary SQLite database, count-validated, then renamed into place.
 - The GUI opens Teams HTML in the default browser and Email databases in `EmailReviewViewer.App.exe`.
+- In Email Review Viewer, use **File > Open Database…** or the **Open Database…** button to open or switch `.db` files. Invalid, corrupt, and incompatible databases are rejected without replacing the current database.
 
 ## Related paths
 
@@ -110,6 +111,8 @@ Expect `ItemsExported=4`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `itemR
 
 ## Recent changes (2026-07-13)
 
+- Version 1.1.0.1 fixes packaged automatic viewer discovery and Windows PowerShell-safe database path passing.
+- Email Review Viewer now starts without a sample database and can open existing databases from **File > Open Database…** or the **Open Database…** button.
 - Version 1.1.0.0 integrates the standalone Email Review Viewer.
 - Email report selection now produces SQLite/FTS5 (`_Email.db`) instead of large Email HTML.
 - Import is offline, parameterized, duplicate-safe by Entry ID (deterministic fallback), and atomic via a temporary database.

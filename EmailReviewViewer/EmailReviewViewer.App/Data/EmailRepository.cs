@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 
 namespace EmailReviewViewer.App.Data;
 
-public sealed class EmailRepository(string databasePath)
+public sealed class EmailRepository(string databasePath) : IDisposable
 {
     private readonly string _connectionString = new SqliteConnectionStringBuilder
     {
@@ -14,6 +14,7 @@ public sealed class EmailRepository(string databasePath)
     }.ToString();
 
     public string DatabasePath { get; } = Path.GetFullPath(databasePath);
+    private bool _disposed;
 
     public async Task EnsureCreatedAsync(CancellationToken cancellationToken = default)
     {
@@ -161,6 +162,7 @@ public sealed class EmailRepository(string databasePath)
         var offset = Math.Max(query.Offset, 0);
         await using var connection = await OpenAsync(cancellationToken);
         var (fromSql, whereSql) = BuildFilterSql(query);
+        var orderBySql = EmailSortSql.BuildOrderBy(query.SortColumn, query.SortDirection);
 
         await using var countCommand = connection.CreateCommand();
         countCommand.CommandText = $"SELECT COUNT(*) FROM EmailMessages m {fromSql} {whereSql};";
@@ -174,7 +176,7 @@ public sealed class EmailRepository(string databasePath)
             FROM EmailMessages m
             {fromSql}
             {whereSql}
-            ORDER BY COALESCE(m.ReceivedUtc, m.SentUtc) DESC, m.Id DESC
+            ORDER BY {orderBySql}
             LIMIT $limit OFFSET $offset;
             """;
         BindFilters(pageCommand, query);
@@ -255,12 +257,22 @@ public sealed class EmailRepository(string databasePath)
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA busy_timeout = 5000;";
         await command.ExecuteNonQueryAsync(cancellationToken);
         return connection;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        using var connection = new SqliteConnection(_connectionString);
+        SqliteConnection.ClearPool(connection);
     }
 
     private static (string FromSql, string WhereSql) BuildFilterSql(EmailQuery query)

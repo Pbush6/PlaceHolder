@@ -1,6 +1,6 @@
 # Purview Teams PST → HTML — Data Contracts
 
-**Version:** 1.1.0.0
+**Version:** 1.1.0.1
 **Last updated:** 2026-07-13
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
@@ -65,7 +65,7 @@ UTF-8 without BOM, one JSON object per physical line. Required data fields are `
 - `EntryId` is the unique duplicate key; missing values receive a deterministic SHA-256 fallback.
 - Import writes `<output>.importing`, validates final row count, then replaces the destination.
 - Staging NDJSON is removed only after importer exit code 0; failures log and retain its exact path.
-- Attachment summaries are deferred in 1.1.0.0.
+- Attachment summaries remain deferred in 1.1.0.1.
 
 ## 6. Launcher ↔ child process
 

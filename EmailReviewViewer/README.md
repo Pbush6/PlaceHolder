@@ -42,7 +42,7 @@ Dates are accepted as ISO-8601 values with offsets and stored as UTC round-trip 
   --benchmark .\EmailReviewViewer\sample-emails.db
 ```
 
-The benchmark executes keyword, date, sender/recipient, and selected-folder filters. Each query requests only 50 list rows and does not select message bodies.
+The benchmark executes keyword, date-sort, subject-sort, sender/recipient, and selected-folder queries. Each query requests only 50 list rows and does not select message bodies.
 
 ## Launch
 
@@ -53,7 +53,9 @@ From source:
   .\EmailReviewViewer\sample-emails.db
 ```
 
-From a published deliverable, keep `sample-emails.db` beside `EmailReviewViewer.App.exe` and double-click the EXE. A different database can be passed as its first command-line argument.
+Double-click the published `EmailReviewViewer.App.exe` to start in the welcome state, then choose **File > Open Database…** or the **Open Database…** button. The file picker accepts Email databases (`*.db`) and validates the SQLite schema before replacing the current database. Invalid or corrupt files show a friendly error and leave the current database open.
+
+A database can still be passed as the first command-line argument for direct opening.
 
 ## Folder browser
 
@@ -64,10 +66,23 @@ From a published deliverable, keep `sample-emails.db` beside `EmailReviewViewer.
 - **All Folders** shows every email. Clearing the last checked folder returns to **All Folders**.
 - Folder filtering is parameterized in SQLite; the UI does not load all matching emails or bodies into memory.
 
+## Results grid controls
+
+- Column headers use bold system colors so they remain distinct from message rows and selection while following Windows contrast settings.
+- Click **Date**, **From**, **To**, or **Subject** to sort the entire filtered result set; click the active heading again to reverse direction.
+- Date starts newest-first. Text columns start A–Z. The active heading shows an ascending or descending glyph.
+- Sorting returns to page 1 while preserving folder, date, participant, and keyword filters.
+- **Preview** is intentionally not sortable because it is unindexed free text; its header has no sort affordance.
+- SQL ordering uses an allowlist and an `Id` tie-breaker for deterministic paging. Message bodies are never selected by list queries.
+
 ## Three-pane review layout
 
 - The folder browser remains on the far left, the paged email results grid is in the center, and a dedicated full-message reader is on the right.
 - Drag either vertical splitter to resize the folder list, result grid, or reading pane.
+- The light enterprise theme uses a restrained navy/slate palette, white document surfaces, subtle separators, and Segoe UI typography. Windows High Contrast mode automatically uses system colors.
+- The application header keeps the current database path visible and gives **Open Database…** clear primary emphasis.
+- Filters are grouped and consistently aligned; **Reset filters** restores the default date sort and clears date, participant, keyword, and folder selections.
+- Folder, message, paging, loading, empty, and error states share consistent spacing and visual hierarchy.
 - Select a row to load its full subject, date/time, sender, recipients, folder, and complete plain-text body.
 - The body is read-only, selectable, line-break preserving, and independently scrollable.
 - Paging or changing filters clears the prior selection and reader safely. Rapid keyboard or mouse selection cancels superseded detail requests.

@@ -22,19 +22,9 @@ internal static class Program
                 return await BenchmarkAsync(args);
 
             var smoke = args.FirstOrDefault()?.Equals("--smoke-ui", StringComparison.OrdinalIgnoreCase) == true;
-            var databasePath = smoke
+            string? databasePath = smoke
                 ? GetPath(args, 1)
-                : args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(AppContext.BaseDirectory, "sample-emails.db");
-            if (!File.Exists(databasePath))
-            {
-                MessageBox.Show(
-                    $"Database not found:{Environment.NewLine}{databasePath}{Environment.NewLine}{Environment.NewLine}" +
-                    "Generate one with the --generate command described in README.md.",
-                    "Email Review Viewer",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return 2;
-            }
+                : args.Length > 0 ? Path.GetFullPath(args[0]) : null;
 
             ApplicationConfiguration.Initialize();
             using var form = new MainForm(databasePath);
@@ -137,10 +127,16 @@ internal static class Program
         var benchmarks = new[]
         {
             ("keyword", new EmailQuery(Keyword: "phoenix", Limit: 50)),
-            ("date", new EmailQuery(
+            ("date-sort", new EmailQuery(
                 FromUtc: new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 ToUtc: new DateTime(2025, 12, 31, 23, 59, 59, DateTimeKind.Utc),
-                Limit: 50)),
+                Limit: 50,
+                SortColumn: EmailSortColumn.Date,
+                SortDirection: EmailSortDirection.Descending)),
+            ("subject-sort", new EmailQuery(
+                Limit: 50,
+                SortColumn: EmailSortColumn.Subject,
+                SortDirection: EmailSortDirection.Ascending)),
             ("sender", new EmailQuery(Party: "alice.morgan@example.com", Limit: 50)),
             ("folder", new EmailQuery(FolderPaths: [@"Mailbox\Projects\Phoenix"], Limit: 50))
         };

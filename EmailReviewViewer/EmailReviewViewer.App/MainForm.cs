@@ -5,7 +5,8 @@ namespace EmailReviewViewer.App;
 public sealed class MainForm : Form
 {
     private const int PageSize = 200;
-    private readonly EmailRepository _repository;
+    private readonly EmailDatabaseStoreSwitcher _store = new();
+    private readonly string? _startupDatabasePath;
     private readonly DateTimePicker _fromDate = new()
     {
         Name = "FromDate",
@@ -27,14 +28,25 @@ public sealed class MainForm : Form
         BorderStyle = BorderStyle.None,
         CheckOnClick = true,
         Dock = DockStyle.Fill,
-        IntegralHeight = false
+        IntegralHeight = false,
+        ItemHeight = 26
     };
     private readonly Label _folderStatus = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
     private readonly ToolTip _folderToolTip = new();
     private readonly DataGridView _grid = new() { Name = "EmailGrid" };
-    private readonly Label _status = new() { AutoSize = true, Padding = new Padding(8, 7, 0, 0) };
-    private readonly Button _previous = new() { Text = "Previous", AutoSize = true };
-    private readonly Button _next = new() { Text = "Next", AutoSize = true };
+    private readonly Label _status = new() { AutoSize = true, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly ToolStripStatusLabel _databasePathStatus = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly Label _headerDatabasePath = new()
+    {
+        Name = "HeaderDatabasePath",
+        AutoEllipsis = true,
+        Text = "No database open"
+    };
+    private readonly Button _openDatabase = new() { Name = "OpenDatabaseButton", Text = "Open Database…" };
+    private readonly Button _search = new() { Name = "SearchButton", Text = "Apply filters" };
+    private readonly Button _resetFilters = new() { Name = "ResetFiltersButton", Text = "Reset filters" };
+    private readonly Button _previous = new() { Text = "Previous" };
+    private readonly Button _next = new() { Text = "Next" };
     private readonly Label _subject = new()
     {
         Name = "ReadingSubject",
@@ -66,24 +78,57 @@ public sealed class MainForm : Form
     private readonly HashSet<string> _selectedFolderPaths = new(StringComparer.Ordinal);
     private bool _updatingFolders;
     private bool _updatingGrid;
+    private bool _resetting;
     private long? _selectedMessageId;
     private int _pageIndex;
     private long _totalCount;
+    private EmailSortColumn _sortColumn = EmailSortColumn.Date;
+    private EmailSortDirection _sortDirection = EmailSortDirection.Descending;
 
-    public MainForm(string databasePath)
+    public MainForm(string? databasePath)
     {
-        _repository = new EmailRepository(databasePath);
-        Text = $"Email Review Viewer — {Path.GetFileName(databasePath)}";
+        var palette = AppTheme.Current;
+        _startupDatabasePath = string.IsNullOrWhiteSpace(databasePath) ? null : Path.GetFullPath(databasePath);
+        Text = "Email Review Viewer";
         Width = 1500;
         Height = 900;
         MinimumSize = new Size(1200, 700);
         StartPosition = FormStartPosition.CenterScreen;
+        Font = AppTheme.Font();
+        BackColor = palette.Canvas;
+        ForeColor = palette.Text;
 
+        var menu = BuildMenu();
+        MainMenuStrip = menu;
         Controls.Add(BuildLayout());
+        Controls.Add(new StatusStrip
+        {
+            BackColor = palette.SubtleSurface,
+            ForeColor = palette.MutedText,
+            SizingGrip = false,
+            Items = { _databasePathStatus }
+        });
+        Controls.Add(menu);
+        AppTheme.StyleButton(_openDatabase, ButtonKind.Primary);
+        AppTheme.StyleButton(_search, ButtonKind.Primary);
+        AppTheme.StyleButton(_resetFilters, ButtonKind.Quiet);
+        AppTheme.StyleButton(_previous, ButtonKind.Secondary);
+        AppTheme.StyleButton(_next, ButtonKind.Secondary);
         ConfigureDatePickerWidth(_fromDate);
         ConfigureDatePickerWidth(_toDate);
         ConfigureGrid();
         WireEvents();
+        ResetReviewState();
+        SetDatabaseLoadedState(false);
+    }
+
+    private MenuStrip BuildMenu()
+    {
+        var open = new ToolStripMenuItem("Open Database…") { Name = "OpenDatabaseMenuItem" };
+        open.Click += async (_, _) => await ChooseDatabaseAsync();
+        var file = new ToolStripMenuItem("&File");
+        file.DropDownItems.Add(open);
+        return new MenuStrip { Items = { file } };
     }
 
     private static void ConfigureDatePickerWidth(DateTimePicker picker)
@@ -107,56 +152,24 @@ public sealed class MainForm : Form
 
     private Control BuildLayout()
     {
-        var filters = new FlowLayoutPanel
+        var palette = AppTheme.Current;
+        var pager = BuildPager();
+        var readingPane = BuildReadingPane();
+        var resultsHeading = new Label
         {
+            Name = "ResultsHeading",
             Dock = DockStyle.Top,
-            Height = 42,
-            Padding = new Padding(6),
-            WrapContents = false
+            Height = 44,
+            Padding = new Padding(AppTheme.SectionPadding, 13, 0, 0),
+            BackColor = palette.Surface,
+            ForeColor = palette.Primary,
+            Font = AppTheme.Font(10F, FontStyle.Bold),
+            Text = "Messages"
         };
-        filters.Controls.AddRange(
-        [
-            new Label { Text = "From:", AutoSize = true, Padding = new Padding(0, 7, 0, 0) },
-            _fromDate,
-            new Label { Text = "To:", AutoSize = true, Padding = new Padding(8, 7, 0, 0) },
-            _toDate,
-            new Label { Text = "People:", AutoSize = true, Padding = new Padding(8, 7, 0, 0) },
-            _party,
-            new Label { Text = "Keyword:", AutoSize = true, Padding = new Padding(8, 7, 0, 0) },
-            _keyword,
-            new Button { Name = "SearchButton", Text = "Search", AutoSize = true },
-            _status
-        ]);
-
-        var pager = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 38,
-            Padding = new Padding(6),
-            FlowDirection = FlowDirection.RightToLeft
-        };
-        pager.Controls.AddRange([_next, _previous]);
-
-        var readingHeader = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 1,
-            Padding = new Padding(10)
-        };
-        readingHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        readingHeader.Controls.Add(_subject);
-        readingHeader.Controls.Add(_headers);
-        readingHeader.SizeChanged += (_, _) =>
-        {
-            var maximumTextWidth = Math.Max(1, readingHeader.ClientSize.Width - readingHeader.Padding.Horizontal);
-            _subject.MaximumSize = new Size(maximumTextWidth, 0);
-            _headers.MaximumSize = new Size(maximumTextWidth, 0);
-        };
-
-        var readingPane = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
-        readingPane.Controls.Add(_body);
-        readingPane.Controls.Add(readingHeader);
+        var resultsPanel = new Panel { Dock = DockStyle.Fill, BackColor = palette.Surface };
+        resultsPanel.Controls.Add(_grid);
+        resultsPanel.Controls.Add(pager);
+        resultsPanel.Controls.Add(resultsHeading);
 
         var messageSplit = new SplitContainer
         {
@@ -166,10 +179,11 @@ public sealed class MainForm : Form
             Size = new Size(1400, 800),
             SplitterDistance = 780,
             Panel1MinSize = 450,
-            Panel2MinSize = 380
+            Panel2MinSize = 380,
+            SplitterWidth = AppTheme.SplitterWidth,
+            BackColor = palette.Border
         };
-        messageSplit.Panel1.Controls.Add(_grid);
-        messageSplit.Panel1.Controls.Add(pager);
+        messageSplit.Panel1.Controls.Add(resultsPanel);
         messageSplit.Panel2.Controls.Add(readingPane);
 
         var contentSplit = new SplitContainer
@@ -180,25 +194,244 @@ public sealed class MainForm : Form
             Size = new Size(1400, 800),
             SplitterDistance = 250,
             Panel1MinSize = 200,
-            Panel2MinSize = 850
+            Panel2MinSize = 850,
+            SplitterWidth = AppTheme.SplitterWidth,
+            BackColor = palette.Border
         };
         contentSplit.Panel1.Controls.Add(BuildFolderPanel());
         contentSplit.Panel2.Controls.Add(messageSplit);
 
-        var root = new Panel { Dock = DockStyle.Fill };
+        var root = new Panel { Dock = DockStyle.Fill, BackColor = palette.Canvas };
         root.Controls.Add(contentSplit);
-        root.Controls.Add(filters);
+        root.Controls.Add(BuildFilterToolbar());
+        root.Controls.Add(BuildApplicationHeader());
         return root;
+    }
+
+    private Control BuildApplicationHeader()
+    {
+        var palette = AppTheme.Current;
+        var title = new Label
+        {
+            Name = "ApplicationTitle",
+            AutoSize = true,
+            ForeColor = SystemInformation.HighContrast ? palette.Text : Color.White,
+            Font = AppTheme.Font(16F, FontStyle.Bold),
+            Text = "Email Review Viewer"
+        };
+        _headerDatabasePath.Dock = DockStyle.Fill;
+        _headerDatabasePath.ForeColor = SystemInformation.HighContrast
+            ? palette.MutedText
+            : Color.FromArgb(204, 216, 229);
+        _headerDatabasePath.Padding = new Padding(0, 3, 0, 0);
+
+        var text = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = new Padding(0),
+            BackColor = palette.Primary
+        };
+        text.RowStyles.Add(new RowStyle(SizeType.Absolute, 31));
+        text.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        text.Controls.Add(title, 0, 0);
+        text.Controls.Add(_headerDatabasePath, 0, 1);
+
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 76,
+            ColumnCount = 2,
+            Padding = new Padding(20, 11, 20, 11),
+            BackColor = palette.Primary
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.Controls.Add(text, 0, 0);
+        header.Controls.Add(_openDatabase, 1, 0);
+        _openDatabase.Anchor = AnchorStyles.Right;
+        _openDatabase.Width = 142;
+        return header;
+    }
+
+    private Control BuildFilterToolbar()
+    {
+        var palette = AppTheme.Current;
+        foreach (var input in new Control[] { _fromDate, _toDate, _party, _keyword })
+            AppTheme.StyleInput(input);
+        _party.Width = 200;
+        _keyword.Width = 260;
+        _search.Width = 108;
+        _resetFilters.Width = 108;
+
+        var fields = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            WrapContents = false,
+            AutoScroll = true,
+            Margin = new Padding(0),
+            BackColor = palette.Surface
+        };
+        fields.Controls.AddRange(
+        [
+            FilterField("From date", _fromDate),
+            FilterField("To date", _toDate),
+            FilterField("Participant", _party),
+            FilterField("Keyword", _keyword)
+        ]);
+
+        var actions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(8, 20, 0, 0),
+            Margin = new Padding(0),
+            BackColor = palette.Surface
+        };
+        actions.Controls.AddRange([_search, _resetFilters]);
+
+        var toolbar = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 92,
+            ColumnCount = 2,
+            Padding = new Padding(20, 10, 20, 10),
+            BackColor = palette.Surface
+        };
+        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
+        toolbar.Controls.Add(fields, 0, 0);
+        toolbar.Controls.Add(actions, 1, 0);
+        return toolbar;
+    }
+
+    private static Control FilterField(string label, Control input)
+    {
+        var panel = new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            RowCount = 2,
+            ColumnCount = 1,
+            Margin = new Padding(0, 0, 14, 0)
+        };
+        panel.Controls.Add(new Label
+        {
+            AutoSize = true,
+            ForeColor = AppTheme.Current.MutedText,
+            Font = AppTheme.Font(8.5F, FontStyle.Bold),
+            Text = label,
+            Margin = new Padding(0, 0, 0, 3)
+        }, 0, 0);
+        panel.Controls.Add(input, 0, 1);
+        return panel;
+    }
+
+    private Control BuildPager()
+    {
+        var palette = AppTheme.Current;
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Margin = new Padding(0)
+        };
+        _previous.Width = 84;
+        _next.Width = 84;
+        buttons.Controls.AddRange([_next, _previous]);
+
+        var pager = new TableLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 52,
+            ColumnCount = 2,
+            Padding = new Padding(AppTheme.SectionPadding, 9, AppTheme.SectionPadding, 7),
+            BackColor = palette.SubtleSurface
+        };
+        pager.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        pager.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
+        pager.Controls.Add(_status, 0, 0);
+        pager.Controls.Add(buttons, 1, 0);
+        _status.Anchor = AnchorStyles.Left;
+        return pager;
+    }
+
+    private Control BuildReadingPane()
+    {
+        var palette = AppTheme.Current;
+        _subject.Font = AppTheme.Font(15F, FontStyle.Bold);
+        _subject.ForeColor = palette.Primary;
+        _headers.Font = AppTheme.Font(9F);
+        _headers.ForeColor = palette.MutedText;
+        _body.Font = AppTheme.Font(10F);
+        _body.BackColor = palette.Surface;
+        _body.ForeColor = palette.Text;
+
+        var eyebrow = new Label
+        {
+            AutoSize = true,
+            ForeColor = palette.Accent,
+            Font = AppTheme.Font(8F, FontStyle.Bold),
+            Text = "MESSAGE",
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        var readingHeader = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            Padding = new Padding(AppTheme.SectionPadding, AppTheme.SectionPadding, AppTheme.SectionPadding, 12),
+            BackColor = palette.Surface
+        };
+        readingHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        readingHeader.Controls.Add(eyebrow);
+        readingHeader.Controls.Add(_subject);
+        readingHeader.Controls.Add(_headers);
+        readingHeader.SizeChanged += (_, _) =>
+        {
+            var width = Math.Max(1, readingHeader.ClientSize.Width - readingHeader.Padding.Horizontal);
+            _subject.MaximumSize = new Size(width, 0);
+            _headers.MaximumSize = new Size(width, 0);
+        };
+
+        var bodyPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(AppTheme.SectionPadding, 14, AppTheme.SectionPadding, AppTheme.SectionPadding),
+            BackColor = palette.Surface
+        };
+        bodyPanel.Controls.Add(_body);
+        var separator = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = palette.Border };
+        var pane = new Panel { Dock = DockStyle.Fill, BackColor = palette.Surface };
+        pane.Controls.Add(bodyPanel);
+        pane.Controls.Add(separator);
+        pane.Controls.Add(readingHeader);
+        return pane;
     }
 
     private Control BuildFolderPanel()
     {
+        var palette = AppTheme.Current;
+        AppTheme.StyleInput(_folderSearch);
+        _folderSearch.Margin = new Padding(0, 2, 0, 10);
+        _allFolders.ForeColor = palette.Text;
+        _allFolders.Margin = new Padding(2, 2, 0, 8);
+        _folderList.BackColor = palette.Surface;
+        _folderList.ForeColor = palette.Text;
+        _folderList.Font = AppTheme.Font(9.5F);
+        _folderStatus.ForeColor = palette.MutedText;
+        _folderStatus.Margin = new Padding(2, 8, 0, 0);
+
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 5,
-            Padding = new Padding(8)
+            Padding = new Padding(AppTheme.SectionPadding),
+            BackColor = palette.SubtleSurface
         };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -207,10 +440,12 @@ public sealed class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(new Label
         {
+            Name = "FolderHeading",
             AutoSize = true,
-            Font = new Font(SystemFonts.MessageBoxFont ?? Control.DefaultFont, FontStyle.Bold),
+            Font = AppTheme.Font(10F, FontStyle.Bold),
+            ForeColor = palette.Primary,
             Text = "Folders",
-            Margin = new Padding(3, 0, 3, 6)
+            Margin = new Padding(0, 0, 0, 10)
         }, 0, 0);
         layout.Controls.Add(_folderSearch, 0, 1);
         layout.Controls.Add(_allFolders, 0, 2);
@@ -221,6 +456,7 @@ public sealed class MainForm : Form
 
     private void ConfigureGrid()
     {
+        var palette = AppTheme.Current;
         _grid.Dock = DockStyle.Fill;
         _grid.ReadOnly = true;
         _grid.AllowUserToAddRows = false;
@@ -230,7 +466,41 @@ public sealed class MainForm : Form
         _grid.MultiSelect = false;
         _grid.RowHeadersVisible = false;
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        _grid.RowTemplate.Height = 25;
+        _grid.RowTemplate.Height = 34;
+        _grid.EnableHeadersVisualStyles = false;
+        _grid.BackgroundColor = palette.Surface;
+        _grid.BorderStyle = BorderStyle.None;
+        _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        _grid.GridColor = palette.Border;
+        _grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        _grid.ColumnHeadersHeight = 38;
+        _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+        _grid.DefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = palette.Surface,
+            ForeColor = palette.Text,
+            SelectionBackColor = palette.Selection,
+            SelectionForeColor = palette.SelectionText,
+            Padding = new Padding(7, 2, 7, 2),
+            Font = AppTheme.Font(9F)
+        };
+        _grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = palette.SubtleSurface,
+            ForeColor = palette.Text,
+            SelectionBackColor = palette.Selection,
+            SelectionForeColor = palette.SelectionText,
+            Padding = new Padding(7, 2, 7, 2)
+        };
+        _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = SystemInformation.HighContrast ? SystemColors.Control : palette.Primary,
+            ForeColor = SystemInformation.HighContrast ? SystemColors.ControlText : Color.White,
+            Font = AppTheme.Font(9F, FontStyle.Bold),
+            SelectionBackColor = SystemInformation.HighContrast ? SystemColors.Control : palette.Primary,
+            SelectionForeColor = SystemInformation.HighContrast ? SystemColors.ControlText : Color.White,
+            Padding = new Padding(7, 0, 7, 0)
+        };
         _grid.Columns.AddRange(
         [
             Column(nameof(EmailListItem.DateUtc), "Date", 135, "g"),
@@ -239,12 +509,15 @@ public sealed class MainForm : Form
             Column(nameof(EmailListItem.Subject), "Subject", 220),
             new DataGridViewTextBoxColumn
             {
+                Name = nameof(EmailListItem.Preview),
                 DataPropertyName = nameof(EmailListItem.Preview),
                 HeaderText = "Preview",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 200
+                MinimumWidth = 200,
+                SortMode = DataGridViewColumnSortMode.NotSortable
             }
         ]);
+        UpdateSortGlyph();
     }
 
     private static DataGridViewTextBoxColumn Column(
@@ -253,9 +526,11 @@ public sealed class MainForm : Form
         int width,
         string? format = null) => new()
         {
+            Name = property,
             DataPropertyName = property,
             HeaderText = title,
             Width = width,
+            SortMode = DataGridViewColumnSortMode.Programmatic,
             DefaultCellStyle = format is null ? null : new DataGridViewCellStyle { Format = format }
         };
 
@@ -267,9 +542,8 @@ public sealed class MainForm : Form
         _toDate.DpiChangedAfterParent += (_, _) => ConfigureDatePickerWidth(_toDate);
         Shown += async (_, _) =>
         {
-            await _repository.EnsureCreatedAsync();
-            await LoadFoldersAsync();
-            await LoadPageAsync();
+            if (_startupDatabasePath is not null)
+                await OpenDatabaseAsync(_startupDatabasePath);
         };
         _debounce.Tick += async (_, _) =>
         {
@@ -282,6 +556,8 @@ public sealed class MainForm : Form
         _fromDate.ValueChanged += (_, _) => RestartDebounce();
         _toDate.ValueChanged += (_, _) => RestartDebounce();
         _folderSearch.TextChanged += (_, _) => RefreshFolderList();
+        _openDatabase.Click += async (_, _) => await ChooseDatabaseAsync();
+        _resetFilters.Click += async (_, _) => await ResetFiltersAsync();
         _folderList.ItemCheck += FolderItemCheck;
         _folderList.MouseMove += FolderListMouseMove;
         _allFolders.Click += async (_, _) =>
@@ -297,7 +573,7 @@ public sealed class MainForm : Form
             _pageIndex = 0;
             await LoadPageAsync();
         };
-        Controls.Find("SearchButton", true).Single().Click += async (_, _) =>
+        _search.Click += async (_, _) =>
         {
             _debounce.Stop();
             _pageIndex = 0;
@@ -315,19 +591,198 @@ public sealed class MainForm : Form
             _pageIndex++;
             await LoadPageAsync();
         };
+        _grid.ColumnHeaderMouseClick += async (_, e) => await SortByColumnAsync(e.ColumnIndex);
+        _grid.CellMouseEnter += (sender, e) =>
+        {
+            if (e.RowIndex == -1 && e.ColumnIndex >= 0 &&
+                EmailSortSql.TryMapColumnKey(_grid.Columns[e.ColumnIndex].DataPropertyName, out _))
+                _grid.Cursor = Cursors.Hand;
+        };
+        _grid.CellMouseLeave += (_, _) => _grid.Cursor = Cursors.Default;
         _grid.SelectionChanged += async (_, _) => await LoadSelectedMessageAsync();
         FormClosed += (_, _) =>
         {
             _pageLoadCancellation?.Cancel();
             _detailLoadCancellation?.Cancel();
+            _store.Dispose();
         };
+    }
+
+    private async Task SortByColumnAsync(int columnIndex)
+    {
+        if (_updatingGrid || columnIndex < 0 ||
+            !EmailSortSql.TryMapColumnKey(_grid.Columns[columnIndex].DataPropertyName, out var column))
+            return;
+
+        if (_sortColumn == column)
+        {
+            _sortDirection = _sortDirection == EmailSortDirection.Ascending
+                ? EmailSortDirection.Descending
+                : EmailSortDirection.Ascending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortDirection = column == EmailSortColumn.Date
+                ? EmailSortDirection.Descending
+                : EmailSortDirection.Ascending;
+        }
+
+        UpdateSortGlyph();
+        _pageIndex = 0;
+        await LoadPageAsync();
+    }
+
+    private void UpdateSortGlyph()
+    {
+        foreach (DataGridViewColumn column in _grid.Columns)
+            column.HeaderCell.SortGlyphDirection = SortOrder.None;
+
+        var key = _sortColumn switch
+        {
+            EmailSortColumn.Date => nameof(EmailListItem.DateUtc),
+            EmailSortColumn.From => nameof(EmailListItem.SenderName),
+            EmailSortColumn.To => nameof(EmailListItem.ToRecipients),
+            EmailSortColumn.Subject => nameof(EmailListItem.Subject),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        _grid.Columns[key].HeaderCell.SortGlyphDirection =
+            _sortDirection == EmailSortDirection.Ascending ? SortOrder.Ascending : SortOrder.Descending;
+    }
+
+    private async Task ChooseDatabaseAsync()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Filter = "Email databases (*.db)|*.db|All files (*.*)|*.*",
+            Title = "Open Email Review Database",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+            await OpenDatabaseAsync(dialog.FileName);
+    }
+
+    private async Task OpenDatabaseAsync(string databasePath)
+    {
+        _debounce.Stop();
+        _pageLoadCancellation?.Cancel();
+        _detailLoadCancellation?.Cancel();
+        _status.Text = "Validating database…";
+        _openDatabase.Enabled = false;
+        try
+        {
+            await _store.SwitchAsync(databasePath);
+            ResetReviewState();
+            SetDatabaseLoadedState(true);
+            Text = $"Email Review Viewer — {Path.GetFileName(databasePath)}";
+            _databasePathStatus.Text = Path.GetFullPath(databasePath);
+            _headerDatabasePath.Text = Path.GetFullPath(databasePath);
+            _headerDatabasePath.AccessibleDescription = $"Current database: {Path.GetFullPath(databasePath)}";
+            await LoadFoldersAsync();
+            await LoadPageAsync();
+        }
+        catch (Exception exception)
+        {
+            SetDatabaseLoadedState(_store.Repository is not null);
+            _status.Text = _store.Repository is null ? "Open a database to begin" : "Database unchanged";
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "Unable to open database",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _openDatabase.Enabled = true;
+        }
+    }
+
+    private void SetDatabaseLoadedState(bool loaded)
+    {
+        foreach (var control in new Control[]
+                 {
+                     _fromDate, _toDate, _party, _keyword, _folderSearch, _allFolders,
+                     _folderList, _search, _resetFilters, _previous, _next, _grid
+                 })
+        {
+            control.Enabled = loaded;
+        }
+    }
+
+    private void ResetReviewState()
+    {
+        _resetting = true;
+        try
+        {
+            _pageIndex = 0;
+            _totalCount = 0;
+            _folders = [];
+            _selectedFolderPaths.Clear();
+            _folderSearch.Clear();
+            _party.Clear();
+            _keyword.Clear();
+            _fromDate.Checked = false;
+            _toDate.Checked = false;
+            _allFolders.Checked = true;
+            _folderList.Items.Clear();
+            _folderStatus.Text = "No database open";
+            _grid.DataSource = null;
+            ClearGridSelectionAndReadingPane();
+            _subject.Text = _store.Repository is null ? "Open a database" : "Select an email";
+            _headers.Text = _store.Repository is null
+                ? "Use File > Open Database… or the Open Database button to begin."
+                : "Choose a row to view the complete message.";
+            _status.Text = _store.Repository is null ? "Open a database to begin" : "Loading…";
+            if (_store.Repository is null)
+            {
+                _databasePathStatus.Text = "No database open";
+                _headerDatabasePath.Text = "No database open";
+            }
+        }
+        finally
+        {
+            _resetting = false;
+        }
     }
 
     private async Task LoadFoldersAsync()
     {
-        _folders = await _repository.GetFolderCountsAsync();
+        if (_store.Repository is not { } repository)
+            return;
+        _folders = await repository.GetFolderCountsAsync();
         _allFolders.Text = $"All Folders ({_folders.Sum(folder => folder.Count):N0})";
         RefreshFolderList();
+    }
+
+    private async Task ResetFiltersAsync()
+    {
+        if (_store.Repository is null)
+            return;
+
+        _debounce.Stop();
+        _resetting = true;
+        try
+        {
+            _fromDate.Checked = false;
+            _toDate.Checked = false;
+            _party.Clear();
+            _keyword.Clear();
+            _folderSearch.Clear();
+            _selectedFolderPaths.Clear();
+            _allFolders.Checked = true;
+            _pageIndex = 0;
+            _sortColumn = EmailSortColumn.Date;
+            _sortDirection = EmailSortDirection.Descending;
+            RefreshFolderList();
+            UpdateSortGlyph();
+        }
+        finally
+        {
+            _resetting = false;
+        }
+
+        await LoadPageAsync();
     }
 
     private void RefreshFolderList()
@@ -387,12 +842,16 @@ public sealed class MainForm : Form
 
     private void RestartDebounce()
     {
+        if (_resetting || _store.Repository is null)
+            return;
         _debounce.Stop();
         _debounce.Start();
     }
 
     private async Task LoadPageAsync()
     {
+        if (_store.Repository is not { } repository)
+            return;
         _pageLoadCancellation?.Cancel();
         _pageLoadCancellation?.Dispose();
         _pageLoadCancellation = new CancellationTokenSource();
@@ -401,7 +860,7 @@ public sealed class MainForm : Form
         _status.Text = "Loading…";
         try
         {
-            var result = await _repository.SearchPageAsync(BuildQuery(), cancellationToken);
+            var result = await repository.SearchPageAsync(BuildQuery(), cancellationToken);
             if (cancellationToken.IsCancellationRequested) return;
             _totalCount = result.TotalCount;
             _updatingGrid = true;
@@ -446,11 +905,15 @@ public sealed class MainForm : Form
             _keyword.Text,
             PageSize,
             _pageIndex * PageSize,
-            _selectedFolderPaths.ToArray());
+            _selectedFolderPaths.ToArray(),
+            _sortColumn,
+            _sortDirection);
     }
 
     private async Task LoadSelectedMessageAsync()
     {
+        if (_store.Repository is not { } repository)
+            return;
         if (_updatingGrid)
             return;
         if (_grid.CurrentRow?.DataBoundItem is not EmailListItem item)
@@ -467,13 +930,13 @@ public sealed class MainForm : Form
         var cancellationToken = _detailLoadCancellation.Token;
         _selectedMessageId = item.Id;
         _subject.Text = string.IsNullOrWhiteSpace(item.Subject) ? "(No subject)" : item.Subject;
-        _headers.ForeColor = SystemColors.GrayText;
+        _headers.ForeColor = AppTheme.Current.MutedText;
         _headers.Text = "Loading full message…";
         _body.Clear();
 
         try
         {
-            var message = await _repository.GetByIdAsync(item.Id, cancellationToken);
+            var message = await repository.GetByIdAsync(item.Id, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _selectedMessageId != item.Id)
                 return;
             if (message is null)
@@ -485,7 +948,7 @@ public sealed class MainForm : Form
             }
 
             _subject.Text = string.IsNullOrWhiteSpace(message.Subject) ? "(No subject)" : message.Subject;
-            _headers.ForeColor = SystemColors.ControlText;
+            _headers.ForeColor = AppTheme.Current.Text;
             _headers.Text =
                 $"Date: {FormatMessageDate(message)}{Environment.NewLine}" +
                 $"From: {FormatSender(message)}{Environment.NewLine}" +
@@ -501,7 +964,7 @@ public sealed class MainForm : Form
         {
             if (cancellationToken.IsCancellationRequested || _selectedMessageId != item.Id)
                 return;
-            _headers.ForeColor = SystemColors.GrayText;
+            _headers.ForeColor = AppTheme.Current.MutedText;
             _headers.Text = "Unable to load this email.";
             _body.Text = $"Unable to load message: {exception.Message}";
         }
@@ -523,7 +986,7 @@ public sealed class MainForm : Form
         }
 
         _subject.Text = "Select an email";
-        _headers.ForeColor = SystemColors.GrayText;
+        _headers.ForeColor = AppTheme.Current.MutedText;
         _headers.Text = "Choose a row to view the complete message.";
         _body.Clear();
     }

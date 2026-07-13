@@ -2,6 +2,13 @@
 
 Generated: 2026-07-03
 
+## Version 1.1.0.1 packaging (2026-07-13)
+
+- Packaged viewer discovery starts from the running converter executable directory, with source and build fallbacks for development runs.
+- Viewer launch uses Windows PowerShell-compatible native argument quoting for database paths containing spaces and punctuation.
+- Automatic launch failures preserve conversion success and log the exact viewer path, database path, and error.
+- Email Review Viewer can open and switch compatible databases from its File menu or Open Database button; startup without an argument shows a welcome state.
+
 ## Version 1.1.0.0 packaging (2026-07-13)
 
 - Build converter EXEs with `pwsh -File .\build.ps1 -Version 1.1.0.0`.

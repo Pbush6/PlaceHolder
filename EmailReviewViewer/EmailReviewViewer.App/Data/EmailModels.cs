@@ -28,6 +28,64 @@ public sealed record EmailListItem(
     string Subject,
     string Preview);
 
+public enum EmailSortColumn
+{
+    Date,
+    From,
+    To,
+    Subject
+}
+
+public enum EmailSortDirection
+{
+    Ascending,
+    Descending
+}
+
+public static class EmailSortSql
+{
+    public static bool TryMapColumnKey(string? key, out EmailSortColumn column)
+    {
+        switch (key)
+        {
+            case nameof(EmailListItem.DateUtc):
+                column = EmailSortColumn.Date;
+                return true;
+            case nameof(EmailListItem.SenderName):
+                column = EmailSortColumn.From;
+                return true;
+            case nameof(EmailListItem.ToRecipients):
+                column = EmailSortColumn.To;
+                return true;
+            case nameof(EmailListItem.Subject):
+                column = EmailSortColumn.Subject;
+                return true;
+            default:
+                column = default;
+                return false;
+        }
+    }
+
+    public static string BuildOrderBy(EmailSortColumn column, EmailSortDirection direction)
+    {
+        var expression = column switch
+        {
+            EmailSortColumn.Date => "COALESCE(m.ReceivedUtc, m.SentUtc)",
+            EmailSortColumn.From => "m.SenderName COLLATE NOCASE",
+            EmailSortColumn.To => "m.ToRecipients COLLATE NOCASE",
+            EmailSortColumn.Subject => "m.Subject COLLATE NOCASE",
+            _ => throw new ArgumentOutOfRangeException(nameof(column), column, "Unsupported email sort column.")
+        };
+        var keyword = direction switch
+        {
+            EmailSortDirection.Ascending => "ASC",
+            EmailSortDirection.Descending => "DESC",
+            _ => throw new ArgumentOutOfRangeException(nameof(direction), direction, "Unsupported sort direction.")
+        };
+        return $"{expression} {keyword}, m.Id ASC";
+    }
+}
+
 public sealed record EmailQuery(
     DateTime? FromUtc = null,
     DateTime? ToUtc = null,
@@ -35,7 +93,9 @@ public sealed record EmailQuery(
     string? Keyword = null,
     int Limit = 200,
     int Offset = 0,
-    IReadOnlyList<string>? FolderPaths = null);
+    IReadOnlyList<string>? FolderPaths = null,
+    EmailSortColumn SortColumn = EmailSortColumn.Date,
+    EmailSortDirection SortDirection = EmailSortDirection.Descending);
 
 public sealed record EmailPage(IReadOnlyList<EmailListItem> Items, long TotalCount);
 
