@@ -22,7 +22,7 @@ Converts a Microsoft Purview eDiscovery PST into a Teams HTML report and/or an E
 - Windows 10/11
 - Microsoft Outlook (installed and registered for COM)
 - PowerShell 7 (`pwsh`)
-- .NET 8 Desktop Runtime for `EmailReviewViewer.App.exe`
+- .NET 8 Desktop Runtime for development/framework-dependent viewer builds only; the portable deployment package includes a self-contained viewer
 - PS2EXE (for building EXEs): `Install-Module ps2exe -Scope CurrentUser`
 
 ## Project layout
@@ -77,6 +77,16 @@ Outputs:
 - `build\PurviewTeamsPstToHtmlConverter.exe` (GUI, no console)
 - `build\PurviewTeamsPstToHtmlConverter_Debug.exe` (console for debugging)
 - `EmailReviewViewer\artifacts\publish\win-x64\EmailReviewViewer.App.exe` (framework-dependent viewer publish)
+
+Build the portable Windows x64 deployment folder and ZIP:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-DeploymentPackage.ps1
+```
+
+This publishes Email Review Viewer self-contained as a single file, so target
+computers do not need the .NET 8 Desktop Runtime. The release is written under
+`Cursor Output\PurviewTeamsPstToHtmlApp\Releases`.
 
 Shipped copies for end users live in:
 
