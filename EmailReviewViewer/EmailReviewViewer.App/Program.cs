@@ -8,7 +8,10 @@ namespace EmailReviewViewer.App;
 internal static class Program
 {
     [STAThread]
-    private static async Task<int> Main(string[] args)
+    private static int Main(string[] args) =>
+        MainAsync(args).GetAwaiter().GetResult();
+
+    private static async Task<int> MainAsync(string[] args)
     {
         try
         {

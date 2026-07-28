@@ -17,12 +17,23 @@ public sealed class EmailRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void Application_entry_point_is_STA_for_native_file_dialogs()
+    {
+        var entryPoint = typeof(EmailReviewViewer.App.MainForm).Assembly.EntryPoint;
+
+        Assert.NotNull(entryPoint);
+        Assert.Contains(
+            entryPoint.GetCustomAttributesData(),
+            attribute => attribute.AttributeType == typeof(STAThreadAttribute));
+    }
+
+    [Fact]
     public void MainForm_without_database_has_open_database_commands_and_welcome_state()
     {
         using var form = new EmailReviewViewer.App.MainForm(null);
         form.CreateControl();
 
-        var openButton = Assert.IsType<System.Windows.Forms.Button>(
+        var openButton = Assert.IsAssignableFrom<System.Windows.Forms.Button>(
             form.Controls.Find("OpenDatabaseButton", true).Single());
         var openMenu = Assert.IsType<System.Windows.Forms.ToolStripMenuItem>(
             form.MainMenuStrip!.Items[0]).DropDownItems
@@ -44,11 +55,11 @@ public sealed class EmailRepositoryTests : IDisposable
         form.Size = form.MinimumSize;
         form.PerformLayout();
 
-        var from = Assert.IsType<System.Windows.Forms.DateTimePicker>(
+        var from = Assert.IsAssignableFrom<System.Windows.Forms.DateTimePicker>(
             form.Controls.Find("FromDate", true).Single());
-        var to = Assert.IsType<System.Windows.Forms.DateTimePicker>(
+        var to = Assert.IsAssignableFrom<System.Windows.Forms.DateTimePicker>(
             form.Controls.Find("ToDate", true).Single());
-        var search = Assert.IsType<System.Windows.Forms.Button>(
+        var search = Assert.IsAssignableFrom<System.Windows.Forms.Button>(
             form.Controls.Find("SearchButton", true).Single());
         var widestDate = Enumerable.Range(1, 12)
             .Select(month => new DateTime(DateTime.Today.Year, month, 28).ToString("d"))
@@ -128,6 +139,160 @@ public sealed class EmailRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void Evidence_Desk_theme_uses_rounded_actions_and_distinct_display_type()
+    {
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        var title = Assert.IsType<System.Windows.Forms.Label>(
+            form.Controls.Find("ApplicationTitle", true).Single());
+        var resultsHeading = Assert.IsType<System.Windows.Forms.Label>(
+            form.Controls.Find("ResultsHeading", true).Single());
+        var formType = typeof(EmailReviewViewer.App.MainForm);
+        var buttons = new[] { "_openDatabase", "_search", "_resetFilters", "_previous", "_next" }
+            .Select(field => Assert.IsAssignableFrom<System.Windows.Forms.Button>(
+                formType.GetField(
+                    field,
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .GetValue(form)))
+            .ToArray();
+
+        Assert.All(buttons, button =>
+        {
+            Assert.Equal("RoundedButton", button.GetType().Name);
+            var radius = button.GetType().GetProperty("CornerRadius");
+            var borderThickness = button.GetType().GetProperty("BorderThickness");
+            Assert.NotNull(radius);
+            Assert.NotNull(borderThickness);
+            Assert.True((int)radius.GetValue(button)! >= 6);
+            Assert.True((int)borderThickness.GetValue(button)! >= 2);
+            Assert.True(button.Font.Size >= 10F);
+            Assert.Null(button.Region);
+        });
+        Assert.Equal(EmailReviewViewer.App.AppTheme.DisplayFontFamilyName, title.Font.FontFamily.Name);
+        Assert.NotEqual("Bahnschrift", title.Font.FontFamily.Name);
+        Assert.True(title.Font.Size >= 18F);
+        Assert.Equal(title.Font.FontFamily.Name, resultsHeading.Font.FontFamily.Name);
+        Assert.NotEqual(form.Font.FontFamily.Name, title.Font.FontFamily.Name);
+    }
+
+    [Fact]
+    public void Evidence_Desk_text_filters_have_rounded_two_pixel_borders()
+    {
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        var formType = typeof(EmailReviewViewer.App.MainForm);
+        var filters = new[] { "_party", "_keyword", "_folderSearch" }
+            .Select(field => Assert.IsAssignableFrom<System.Windows.Forms.Control>(
+                formType.GetField(
+                    field,
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .GetValue(form)));
+
+        Assert.All(filters, filter =>
+        {
+            Assert.Equal("RoundedInputHost", filter.Parent!.GetType().Name);
+            Assert.True((int)filter.Parent.GetType().GetProperty("CornerRadius")!.GetValue(filter.Parent)! >= 6);
+            Assert.True((int)filter.Parent.GetType().GetProperty("BorderThickness")!.GetValue(filter.Parent)! >= 2);
+        });
+    }
+
+    [Fact]
+    public void Evidence_Desk_date_filters_put_checkboxes_outside_borderless_native_pickers()
+    {
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        form.PerformLayout();
+
+        foreach (var prefix in new[] { "From", "To" })
+        {
+            var picker = Assert.IsAssignableFrom<System.Windows.Forms.DateTimePicker>(
+                form.Controls.Find($"{prefix}Date", true).Single());
+            var enabled = Assert.IsType<System.Windows.Forms.CheckBox>(
+                form.Controls.Find($"{prefix}DateEnabled", true).Single());
+            var roundedHost = picker.Parent;
+            while (roundedHost is not null && roundedHost.GetType().Name != "RoundedInputHost")
+                roundedHost = roundedHost.Parent;
+
+            Assert.False(picker.ShowCheckBox);
+            Assert.NotNull(roundedHost);
+            Assert.Same(enabled.Parent, roundedHost.Parent);
+            Assert.True(enabled.Right < roundedHost.Left);
+        }
+    }
+
+    [Fact]
+    public void External_date_checkbox_controls_whether_date_enters_query()
+    {
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        var picker = Assert.IsAssignableFrom<System.Windows.Forms.DateTimePicker>(
+            form.Controls.Find("FromDate", true).Single());
+        var enabled = Assert.IsType<System.Windows.Forms.CheckBox>(
+            form.Controls.Find("FromDateEnabled", true).Single());
+        var buildQuery = typeof(EmailReviewViewer.App.MainForm).GetMethod(
+            "BuildQuery",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        picker.Value = new DateTime(2026, 7, 20);
+
+        enabled.Checked = false;
+        var disabledQuery = Assert.IsType<EmailQuery>(buildQuery.Invoke(form, null));
+        enabled.Checked = true;
+        var enabledQuery = Assert.IsType<EmailQuery>(buildQuery.Invoke(form, null));
+
+        Assert.Null(disabledQuery.FromUtc);
+        Assert.NotNull(enabledQuery.FromUtc);
+        Assert.Equal(
+            DateTime.SpecifyKind(picker.Value.Date, DateTimeKind.Local).ToUniversalTime(),
+            enabledQuery.FromUtc);
+    }
+
+    [Fact]
+    public void Pager_reserves_the_full_previous_button_border()
+    {
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        form.PerformLayout();
+        var formType = typeof(EmailReviewViewer.App.MainForm);
+        var previous = Assert.IsAssignableFrom<System.Windows.Forms.Button>(
+            formType.GetField(
+                "_previous",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(form));
+        Assert.True(previous.Left >= 0);
+        Assert.True(previous.Right <= previous.Parent!.ClientSize.Width);
+    }
+
+    [Fact]
+    public void Text_and_date_filter_borders_share_the_same_top_edge()
+    {
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        form.PerformLayout();
+        var party = Assert.IsType<System.Windows.Forms.TextBox>(
+            typeof(EmailReviewViewer.App.MainForm).GetField(
+                "_party",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(form));
+        var fromDate = Assert.IsAssignableFrom<System.Windows.Forms.DateTimePicker>(
+            form.Controls.Find("FromDate", true).Single());
+        var partyHost = party.Parent!;
+        var dateHost = fromDate.Parent;
+        while (dateHost is not null && dateHost.GetType().Name != "RoundedInputHost")
+            dateHost = dateHost.Parent;
+
+        Assert.NotNull(dateHost);
+        Assert.Equal(TopWithinForm(dateHost, form), TopWithinForm(partyHost, form));
+
+        static int TopWithinForm(System.Windows.Forms.Control control, System.Windows.Forms.Form form)
+        {
+            var top = 0;
+            for (var current = control; current != form; current = current.Parent!)
+                top += current.Top;
+            return top;
+        }
+    }
+
+    [Fact]
     public void MainForm_exposes_professional_header_filter_reset_and_section_hierarchy()
     {
         using var form = new EmailReviewViewer.App.MainForm(null);
@@ -139,19 +304,52 @@ public sealed class EmailRepositoryTests : IDisposable
             form.Controls.Find("ApplicationTitle", true).Single());
         var database = Assert.IsType<System.Windows.Forms.Label>(
             form.Controls.Find("HeaderDatabasePath", true).Single());
-        var reset = Assert.IsType<System.Windows.Forms.Button>(
+        var reset = Assert.IsAssignableFrom<System.Windows.Forms.Button>(
             form.Controls.Find("ResetFiltersButton", true).Single());
         var folderHeading = Assert.IsType<System.Windows.Forms.Label>(
             form.Controls.Find("FolderHeading", true).Single());
         var resultsHeading = Assert.IsType<System.Windows.Forms.Label>(
             form.Controls.Find("ResultsHeading", true).Single());
+        var resultsTotal = Assert.IsType<System.Windows.Forms.Label>(
+            form.Controls.Find("ResultsTotal", true).Single());
 
-        Assert.Equal("Email Review Viewer", title.Text);
+        Assert.Equal("Email Reviewer", title.Text);
         Assert.Contains("database", database.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Reset filters", reset.Text);
         Assert.Equal("Folders", folderHeading.Text);
         Assert.Equal("Messages", resultsHeading.Text);
+        Assert.Equal("Total: 0", resultsTotal.Text);
+        Assert.True(resultsHeading.Left < resultsTotal.Left);
+        Assert.InRange(resultsTotal.Left - resultsHeading.Right, 8, 24);
         Assert.True(reset.Right <= reset.Parent!.ClientSize.Width);
+    }
+
+    [Fact]
+    public async Task MainForm_results_heading_shows_filtered_message_total()
+    {
+        using var repository = await CreateSeededRepositoryAsync();
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        var formType = typeof(EmailReviewViewer.App.MainForm);
+        var openDatabase = formType.GetMethod(
+            "OpenDatabaseAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var loadPage = formType.GetMethod(
+            "LoadPageAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var party = Assert.IsType<System.Windows.Forms.TextBox>(
+            formType.GetField(
+                "_party",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(form));
+
+        await Assert.IsAssignableFrom<Task>(openDatabase.Invoke(form, [_databasePath]));
+        party.Text = "bob@example.com";
+        await Assert.IsAssignableFrom<Task>(loadPage.Invoke(form, null));
+
+        var resultsTotal = Assert.IsType<System.Windows.Forms.Label>(
+            form.Controls.Find("ResultsTotal", true).Single());
+        Assert.Equal("Total: 1", resultsTotal.Text);
     }
 
     [Theory]

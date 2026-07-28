@@ -7,17 +7,29 @@ public sealed class MainForm : Form
     private const int PageSize = 200;
     private readonly EmailDatabaseStoreSwitcher _store = new();
     private readonly string? _startupDatabasePath;
-    private readonly DateTimePicker _fromDate = new()
+    private readonly DateTimePicker _fromDate = new RoundedDateTimePicker
     {
         Name = "FromDate",
         Format = DateTimePickerFormat.Short,
-        ShowCheckBox = true
+        ShowCheckBox = false
     };
-    private readonly DateTimePicker _toDate = new()
+    private readonly CheckBox _fromDateEnabled = new()
+    {
+        Name = "FromDateEnabled",
+        AccessibleName = "Enable from date filter",
+        AutoSize = true
+    };
+    private readonly DateTimePicker _toDate = new RoundedDateTimePicker
     {
         Name = "ToDate",
         Format = DateTimePickerFormat.Short,
-        ShowCheckBox = true
+        ShowCheckBox = false
+    };
+    private readonly CheckBox _toDateEnabled = new()
+    {
+        Name = "ToDateEnabled",
+        AccessibleName = "Enable to date filter",
+        AutoSize = true
     };
     private readonly TextBox _party = new() { PlaceholderText = "Sender or recipient", Width = 180 };
     private readonly TextBox _keyword = new() { PlaceholderText = "Subject, body, from, to", Width = 220 };
@@ -34,6 +46,8 @@ public sealed class MainForm : Form
     private readonly Label _folderStatus = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
     private readonly ToolTip _folderToolTip = new();
     private readonly DataGridView _grid = new() { Name = "EmailGrid" };
+    private readonly Label _resultsHeading = new() { Name = "ResultsHeading", AutoSize = true, Text = "Messages" };
+    private readonly Label _resultsTotal = new() { Name = "ResultsTotal", AutoSize = true };
     private readonly Label _status = new() { AutoSize = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly ToolStripStatusLabel _databasePathStatus = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly Label _headerDatabasePath = new()
@@ -42,11 +56,11 @@ public sealed class MainForm : Form
         AutoEllipsis = true,
         Text = "No database open"
     };
-    private readonly Button _openDatabase = new() { Name = "OpenDatabaseButton", Text = "Open Database…" };
-    private readonly Button _search = new() { Name = "SearchButton", Text = "Apply filters" };
-    private readonly Button _resetFilters = new() { Name = "ResetFiltersButton", Text = "Reset filters" };
-    private readonly Button _previous = new() { Text = "Previous" };
-    private readonly Button _next = new() { Text = "Next" };
+    private readonly Button _openDatabase = new RoundedButton { Name = "OpenDatabaseButton", Text = "Open Database…" };
+    private readonly Button _search = new RoundedButton { Name = "SearchButton", Text = "Apply filters" };
+    private readonly Button _resetFilters = new RoundedButton { Name = "ResetFiltersButton", Text = "Reset filters" };
+    private readonly Button _previous = new RoundedButton { Text = "Previous" };
+    private readonly Button _next = new RoundedButton { Text = "Next" };
     private readonly Label _subject = new()
     {
         Name = "ReadingSubject",
@@ -138,13 +152,7 @@ public sealed class MainForm : Form
         var widestDate = Enumerable.Range(0, daysInYear)
             .Select(day => firstDay.AddDays(day).ToString("d"))
             .Max(text => TextRenderer.MeasureText(text, picker.Font).Width);
-        using var graphics = picker.CreateGraphics();
-        var checkboxWidth = CheckBoxRenderer.GetGlyphSize(
-            graphics,
-            System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedNormal).Width;
-        var safetyPadding = (int)Math.Ceiling(12 * picker.DeviceDpi / 96d);
-        var minimumWidth =
-            widestDate + checkboxWidth + SystemInformation.VerticalScrollBarWidth + safetyPadding;
+        var minimumWidth = widestDate + (SystemInformation.VerticalScrollBarWidth * 2);
 
         picker.MinimumSize = new Size(minimumWidth, 0);
         picker.Width = minimumWidth;
@@ -155,21 +163,32 @@ public sealed class MainForm : Form
         var palette = AppTheme.Current;
         var pager = BuildPager();
         var readingPane = BuildReadingPane();
-        var resultsHeading = new Label
+        _resultsHeading.ForeColor = palette.Primary;
+        _resultsHeading.Font = AppTheme.DisplayFont(12F, FontStyle.Bold);
+        _resultsHeading.Anchor = AnchorStyles.Left;
+        _resultsHeading.Margin = new Padding(0);
+        _resultsTotal.ForeColor = palette.MutedText;
+        _resultsTotal.Font = AppTheme.Font(10F, FontStyle.Bold);
+        _resultsTotal.Anchor = AnchorStyles.Left;
+        _resultsTotal.Margin = new Padding(12, 0, 0, 0);
+        var resultsHeader = new TableLayoutPanel
         {
-            Name = "ResultsHeading",
+            Name = "ResultsHeader",
             Dock = DockStyle.Top,
-            Height = 44,
-            Padding = new Padding(AppTheme.SectionPadding, 13, 0, 0),
-            BackColor = palette.Surface,
-            ForeColor = palette.Primary,
-            Font = AppTheme.Font(10F, FontStyle.Bold),
-            Text = "Messages"
+            Height = 48,
+            ColumnCount = 3,
+            Padding = new Padding(AppTheme.SectionPadding, 0, AppTheme.SectionPadding, 0),
+            BackColor = palette.Surface
         };
+        resultsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        resultsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        resultsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        resultsHeader.Controls.Add(_resultsHeading, 0, 0);
+        resultsHeader.Controls.Add(_resultsTotal, 1, 0);
         var resultsPanel = new Panel { Dock = DockStyle.Fill, BackColor = palette.Surface };
         resultsPanel.Controls.Add(_grid);
         resultsPanel.Controls.Add(pager);
-        resultsPanel.Controls.Add(resultsHeading);
+        resultsPanel.Controls.Add(resultsHeader);
 
         var messageSplit = new SplitContainer
         {
@@ -216,8 +235,8 @@ public sealed class MainForm : Form
             Name = "ApplicationTitle",
             AutoSize = true,
             ForeColor = SystemInformation.HighContrast ? palette.Text : Color.White,
-            Font = AppTheme.Font(16F, FontStyle.Bold),
-            Text = "Email Review Viewer"
+            Font = AppTheme.DisplayFont(20F, FontStyle.Bold),
+            Text = "Email Reviewer"
         };
         _headerDatabasePath.Dock = DockStyle.Fill;
         _headerDatabasePath.ForeColor = SystemInformation.HighContrast
@@ -233,7 +252,7 @@ public sealed class MainForm : Form
             Margin = new Padding(0),
             BackColor = palette.Primary
         };
-        text.RowStyles.Add(new RowStyle(SizeType.Absolute, 31));
+        text.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         text.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         text.Controls.Add(title, 0, 0);
         text.Controls.Add(_headerDatabasePath, 0, 1);
@@ -241,7 +260,7 @@ public sealed class MainForm : Form
         var header = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 76,
+            Height = 84,
             ColumnCount = 2,
             Padding = new Padding(20, 11, 20, 11),
             BackColor = palette.Primary
@@ -251,7 +270,7 @@ public sealed class MainForm : Form
         header.Controls.Add(text, 0, 0);
         header.Controls.Add(_openDatabase, 1, 0);
         _openDatabase.Anchor = AnchorStyles.Right;
-        _openDatabase.Width = 142;
+        _openDatabase.Width = 156;
         return header;
     }
 
@@ -260,10 +279,20 @@ public sealed class MainForm : Form
         var palette = AppTheme.Current;
         foreach (var input in new Control[] { _fromDate, _toDate, _party, _keyword })
             AppTheme.StyleInput(input);
+        ConfigureDatePickerWidth(_fromDate);
+        ConfigureDatePickerWidth(_toDate);
         _party.Width = 200;
         _keyword.Width = 260;
-        _search.Width = 108;
-        _resetFilters.Width = 108;
+        _search.Width = 118;
+        _resetFilters.Width = 118;
+        var fromDateInput = DateFilterInput(
+            _fromDateEnabled,
+            new RoundedInputHost(_fromDate) { Width = _fromDate.Width + 20 });
+        var toDateInput = DateFilterInput(
+            _toDateEnabled,
+            new RoundedInputHost(_toDate) { Width = _toDate.Width + 20 });
+        var partyInput = new RoundedInputHost(_party) { Width = _party.Width, Margin = Padding.Empty };
+        var keywordInput = new RoundedInputHost(_keyword) { Width = _keyword.Width, Margin = Padding.Empty };
 
         var fields = new FlowLayoutPanel
         {
@@ -275,10 +304,10 @@ public sealed class MainForm : Form
         };
         fields.Controls.AddRange(
         [
-            FilterField("From date", _fromDate),
-            FilterField("To date", _toDate),
-            FilterField("Participant", _party),
-            FilterField("Keyword", _keyword)
+            FilterField("From date", fromDateInput),
+            FilterField("To date", toDateInput),
+            FilterField("Participant", partyInput),
+            FilterField("Keyword", keywordInput)
         ]);
 
         var actions = new FlowLayoutPanel
@@ -295,16 +324,34 @@ public sealed class MainForm : Form
         var toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 92,
+            Height = 96,
             ColumnCount = 2,
             Padding = new Padding(20, 10, 20, 10),
             BackColor = palette.Surface
         };
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
+        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280));
         toolbar.Controls.Add(fields, 0, 0);
         toolbar.Controls.Add(actions, 1, 0);
         return toolbar;
+    }
+
+    private static Control DateFilterInput(CheckBox enabled, RoundedInputHost picker)
+    {
+        enabled.Margin = new Padding(0, 10, 6, 0);
+        picker.Margin = Padding.Empty;
+        var panel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            BackColor = AppTheme.Current.Surface
+        };
+        panel.Controls.Add(enabled);
+        panel.Controls.Add(picker);
+        return panel;
     }
 
     private static Control FilterField(string label, Control input)
@@ -321,7 +368,7 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             ForeColor = AppTheme.Current.MutedText,
-            Font = AppTheme.Font(8.5F, FontStyle.Bold),
+            Font = AppTheme.DisplayFont(9.5F, FontStyle.Bold),
             Text = label,
             Margin = new Padding(0, 0, 0, 3)
         }, 0, 0);
@@ -339,8 +386,8 @@ public sealed class MainForm : Form
             WrapContents = false,
             Margin = new Padding(0)
         };
-        _previous.Width = 84;
-        _next.Width = 84;
+        _previous.Width = 92;
+        _next.Width = 92;
         buttons.Controls.AddRange([_next, _previous]);
 
         var pager = new TableLayoutPanel
@@ -352,7 +399,7 @@ public sealed class MainForm : Form
             BackColor = palette.SubtleSurface
         };
         pager.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        pager.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
+        pager.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 204));
         pager.Controls.Add(_status, 0, 0);
         pager.Controls.Add(buttons, 1, 0);
         _status.Anchor = AnchorStyles.Left;
@@ -362,7 +409,7 @@ public sealed class MainForm : Form
     private Control BuildReadingPane()
     {
         var palette = AppTheme.Current;
-        _subject.Font = AppTheme.Font(15F, FontStyle.Bold);
+        _subject.Font = AppTheme.DisplayFont(17F, FontStyle.Bold);
         _subject.ForeColor = palette.Primary;
         _headers.Font = AppTheme.Font(9F);
         _headers.ForeColor = palette.MutedText;
@@ -374,7 +421,7 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             ForeColor = palette.Accent,
-            Font = AppTheme.Font(8F, FontStyle.Bold),
+            Font = AppTheme.DisplayFont(9F, FontStyle.Bold),
             Text = "MESSAGE",
             Margin = new Padding(0, 0, 0, 8)
         };
@@ -416,7 +463,11 @@ public sealed class MainForm : Form
     {
         var palette = AppTheme.Current;
         AppTheme.StyleInput(_folderSearch);
-        _folderSearch.Margin = new Padding(0, 2, 0, 10);
+        var folderSearchInput = new RoundedInputHost(_folderSearch)
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 2, 0, 10)
+        };
         _allFolders.ForeColor = palette.Text;
         _allFolders.Margin = new Padding(2, 2, 0, 8);
         _folderList.BackColor = palette.Surface;
@@ -442,12 +493,12 @@ public sealed class MainForm : Form
         {
             Name = "FolderHeading",
             AutoSize = true,
-            Font = AppTheme.Font(10F, FontStyle.Bold),
+            Font = AppTheme.DisplayFont(12F, FontStyle.Bold),
             ForeColor = palette.Primary,
             Text = "Folders",
             Margin = new Padding(0, 0, 0, 10)
         }, 0, 0);
-        layout.Controls.Add(_folderSearch, 0, 1);
+        layout.Controls.Add(folderSearchInput, 0, 1);
         layout.Controls.Add(_allFolders, 0, 2);
         layout.Controls.Add(_folderList, 0, 3);
         layout.Controls.Add(_folderStatus, 0, 4);
@@ -496,7 +547,7 @@ public sealed class MainForm : Form
         {
             BackColor = SystemInformation.HighContrast ? SystemColors.Control : palette.Primary,
             ForeColor = SystemInformation.HighContrast ? SystemColors.ControlText : Color.White,
-            Font = AppTheme.Font(9F, FontStyle.Bold),
+            Font = AppTheme.DisplayFont(9F, FontStyle.Bold),
             SelectionBackColor = SystemInformation.HighContrast ? SystemColors.Control : palette.Primary,
             SelectionForeColor = SystemInformation.HighContrast ? SystemColors.ControlText : Color.White,
             Padding = new Padding(7, 0, 7, 0)
@@ -555,6 +606,8 @@ public sealed class MainForm : Form
         _keyword.TextChanged += (_, _) => RestartDebounce();
         _fromDate.ValueChanged += (_, _) => RestartDebounce();
         _toDate.ValueChanged += (_, _) => RestartDebounce();
+        _fromDateEnabled.CheckedChanged += (_, _) => RestartDebounce();
+        _toDateEnabled.CheckedChanged += (_, _) => RestartDebounce();
         _folderSearch.TextChanged += (_, _) => RefreshFolderList();
         _openDatabase.Click += async (_, _) => await ChooseDatabaseAsync();
         _resetFilters.Click += async (_, _) => await ResetFiltersAsync();
@@ -702,7 +755,8 @@ public sealed class MainForm : Form
     {
         foreach (var control in new Control[]
                  {
-                     _fromDate, _toDate, _party, _keyword, _folderSearch, _allFolders,
+                     _fromDate, _toDate, _fromDateEnabled, _toDateEnabled,
+                     _party, _keyword, _folderSearch, _allFolders,
                      _folderList, _search, _resetFilters, _previous, _next, _grid
                  })
         {
@@ -717,13 +771,14 @@ public sealed class MainForm : Form
         {
             _pageIndex = 0;
             _totalCount = 0;
+            UpdateResultsTotal();
             _folders = [];
             _selectedFolderPaths.Clear();
             _folderSearch.Clear();
             _party.Clear();
             _keyword.Clear();
-            _fromDate.Checked = false;
-            _toDate.Checked = false;
+            _fromDateEnabled.Checked = false;
+            _toDateEnabled.Checked = false;
             _allFolders.Checked = true;
             _folderList.Items.Clear();
             _folderStatus.Text = "No database open";
@@ -764,8 +819,8 @@ public sealed class MainForm : Form
         _resetting = true;
         try
         {
-            _fromDate.Checked = false;
-            _toDate.Checked = false;
+            _fromDateEnabled.Checked = false;
+            _toDateEnabled.Checked = false;
             _party.Clear();
             _keyword.Clear();
             _folderSearch.Clear();
@@ -863,6 +918,7 @@ public sealed class MainForm : Form
             var result = await repository.SearchPageAsync(BuildQuery(), cancellationToken);
             if (cancellationToken.IsCancellationRequested) return;
             _totalCount = result.TotalCount;
+            UpdateResultsTotal();
             _updatingGrid = true;
             try
             {
@@ -890,12 +946,15 @@ public sealed class MainForm : Form
         }
     }
 
+    private void UpdateResultsTotal() =>
+        _resultsTotal.Text = $"Total: {_totalCount:N0}";
+
     private EmailQuery BuildQuery()
     {
-        DateTime? from = _fromDate.Checked
+        DateTime? from = _fromDateEnabled.Checked
             ? DateTime.SpecifyKind(_fromDate.Value.Date, DateTimeKind.Local).ToUniversalTime()
             : null;
-        DateTime? to = _toDate.Checked
+        DateTime? to = _toDateEnabled.Checked
             ? DateTime.SpecifyKind(_toDate.Value.Date.AddDays(1).AddTicks(-1), DateTimeKind.Local).ToUniversalTime()
             : null;
         return new EmailQuery(
