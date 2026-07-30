@@ -111,6 +111,13 @@ Describe 'Calendar and contacts HTML reports' {
         $calendarHtml | Should -Match "id='calendarRecurringFilter'"
         $calendarHtml | Should -Match "id='calendarClearFiltersBtn'"
         $calendarHtml | Should -Match "id='calendarVisibleCount'"
+        $calendarHtml | Should -Match "id='calendarAgenda'"
+        $calendarHtml | Should -Match "id='calendarAgendaList'"
+        $calendarHtml | Should -Match "id='calendarMonthGrid'"
+        $calendarHtml | Should -Match "id='calendarDetail'"
+        $calendarHtml | Should -Match "id='calendarPreviousMonth'"
+        $calendarHtml | Should -Match "id='calendarNextMonth'"
+        $calendarHtml | Should -Match "id='calendarToday'"
         $calendarHtml | Should -Match "data-search='"
         $calendarHtml | Should -Match "data-start-date='"
         $calendarHtml | Should -Match "data-end-date='"
@@ -118,6 +125,7 @@ Describe 'Calendar and contacts HTML reports' {
         $calendarHtml | Should -Match "data-item-type='"
         $calendarHtml | Should -Match "data-all-day='"
         $calendarHtml | Should -Match "data-recurring='"
+        $calendarHtml | Should -Match "data-entry-id='"
         $calendarHtml | Should -Match '\.dataset\.search'
         $calendarHtml | Should -Match '\.dataset\.startDate'
         $calendarHtml | Should -Match '\.dataset\.endDate'
@@ -125,6 +133,11 @@ Describe 'Calendar and contacts HTML reports' {
         $calendarHtml | Should -Match '\.dataset\.itemType'
         $calendarHtml | Should -Match '\.dataset\.allDay'
         $calendarHtml | Should -Match '\.dataset\.recurring'
+        $calendarHtml | Should -Match '\.dataset\.entryId'
+        $calendarHtml | Should -Match 'function\s+selectEvent'
+        $calendarHtml | Should -Match "setAttribute\('data-entry-id'"
+        $calendarHtml | Should -Match 'scrollIntoView'
+        $calendarHtml | Should -Match "classList\.add\('flash'\)"
         $calendarHtml | Should -Match 'requestAnimationFrame|setTimeout'
         $calendarHtml | Should -Match 'content-visibility:\s*auto'
         $calendarHtml | Should -Match 'contain-intrinsic-size'
@@ -139,9 +152,15 @@ Describe 'Calendar and contacts HTML reports' {
         $calendarHtml | Should -Not -Match 'textContent\s*\|\|'
         $calendarHtml | Should -Not -Match '_searchText'
         $calendarHtml | Should -Not -Match "id='resizeHandle'"
-        $calendarLayoutOverride = [regex]::Match($calendarHtml, '(?s)@media\s*\(min-width:\s*901px\)\s*\{\s*\.review-layout\s*\{\s*grid-template-columns:\s*minmax\([^;]+\)\s+minmax\(0,\s*1fr\)[^}]*\}\s*\}')
+        $calendarLayoutOverride = [regex]::Match($calendarHtml, '(?s)@media\s*\(min-width:\s*1181px\)\s*\{[^}]*\.calendar-shell\s*\{\s*grid-template-columns:\s*240px\s+minmax\(0,\s*1\.35fr\)\s+320px[^}]*\}')
         $calendarLayoutOverride.Success | Should -BeTrue
         $calendarLayoutOverride.Value | Should -Not -Match '10px'
+        $calendarHtml | Should -Not -Match 'grid-template-columns:[^;]*10px' -Because 'Calendar must not ship the removed resize-handle track'
+        $calendarHtml | Should -Match 'All matching meetings in chronological order'
+        $calendarHtml | Should -Match 'calendar-detail-head'
+        $calendarHtml | Should -Match 'calendar-detail-field'
+        $calendarHtml | Should -Match 'chronologicalCards\(filteredCards\)'
+        $calendarHtml | Should -Not -Match 'items this month'
 
         $contactsHtml | Should -Match "id='contactsSearch'"
         $contactsHtml | Should -Match "id='contactsFolderFilter'"

@@ -2443,6 +2443,82 @@ function Get-StaticRecordReportCss {
 '@
 }
 
+function Get-CalendarReportCss {
+    $baseCss = Get-StaticRecordReportCss
+    $baseCss = [regex]::Replace($baseCss, '(?m)^\.review-layout \{[^\r\n]*10px[^\r\n]*\}\r?\n?', '')
+    return $baseCss + @'
+.calendar-shell { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.calendar-panel { background: #fff; border: 1px solid #d4dce6; border-radius: 16px; box-shadow: 0 10px 30px rgba(26, 35, 50, .08); overflow: hidden; }
+.calendar-agenda, .calendar-detail { min-height: 280px; display: flex; flex-direction: column; }
+.calendar-panel-heading { padding: 14px 16px 12px; border-bottom: 1px solid #d4dce6; background: linear-gradient(180deg, #f8fbfd, #fff); }
+.calendar-panel-heading h2 { margin: 0 0 4px; font-size: .95rem; font-weight: 700; color: #1a2332; }
+.calendar-panel-heading p { margin: 0; color: #5c6b7a; font-size: .75rem; }
+.calendar-agenda-count { display: block; margin-top: 8px; color: #0d6e6e; font-size: .75rem; font-weight: 700; }
+.calendar-agenda-list { flex: 1; min-height: 0; max-height: 68vh; overflow-y: auto; padding: 8px; }
+.calendar-agenda-group { margin: 8px 4px 4px; color: #5c6b7a; font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.calendar-agenda-item { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 10px; width: 100%; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #1a2332; text-align: left; white-space: normal; cursor: pointer; font: inherit; }
+.calendar-agenda-item:hover { background: #f5f8fb; border-color: #d4dce6; }
+.calendar-agenda-item.active { background: #e4f4f3; border-color: #9ecfcd; }
+.calendar-agenda-rail { border-radius: 999px; min-height: 28px; align-self: stretch; background: #1f5fbf; }
+.calendar-agenda-item.allday .calendar-agenda-rail { background: #8a5a12; }
+.calendar-agenda-item.recurring .calendar-agenda-rail { background: #6b3fa0; }
+.calendar-agenda-time { color: #5c6b7a; font-size: .7rem; font-weight: 600; }
+.calendar-agenda-title { margin-top: 2px; font-size: .82rem; font-weight: 650; line-height: 1.3; }
+.calendar-agenda-place { margin-top: 3px; color: #5c6b7a; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-agenda-time, .calendar-agenda-title, .calendar-agenda-place { display: block; }
+.calendar-agenda-empty { padding: 20px 12px; color: #5c6b7a; text-align: center; }
+.calendar-toolbar { display: grid; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #d4dce6; }
+.calendar-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.calendar-nav h2 { min-width: 170px; margin: 0 4px; text-align: center; font-size: 1.45rem; font-weight: 700; color: #1a2332; }
+.calendar-nav button { padding: 8px 11px; border: 2px solid #d4dce6; border-radius: 8px; }
+.calendar-nav button#calendarToday { padding: 5px 9px; background: #0d6e6e; border-color: #0d6e6e; color: #fff; font-size: .78rem; font-weight: 600; }
+.calendar-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 8px; }
+.calendar-filter-grid label { display: grid; gap: 4px; color: #334155; font-size: .76rem; font-weight: 700; }
+.calendar-filter-grid input, .calendar-filter-grid select { width: 100%; min-width: 0; padding: 8px 9px; border: 2px solid #b9c4d3; border-radius: 8px; background: white; font: inherit; }
+.calendar-filter-actions { display: flex; align-items: end; }
+.calendar-filter-actions button { width: 100%; border: 2px solid #d4dce6; border-radius: 8px; }
+.calendar-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 16px 4px; color: #5c6b7a; font-size: .75rem; }
+.calendar-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; }
+.calendar-month { padding: 8px 10px 14px; }
+.calendar-weekdays, .calendar-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.calendar-weekdays span { padding: 5px 0; color: #5c6b7a; font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-align: center; text-transform: uppercase; }
+.calendar-month-grid { min-height: 580px; }
+.calendar-day { min-height: 98px; padding: 7px; border: 1px solid #d4dce6; border-radius: 10px; background: #fbfcfe; scroll-margin-top: 100px; transition: box-shadow 180ms ease, background 180ms ease; }
+.calendar-day.outside { opacity: .45; background: #f3f5f8; }
+.calendar-day.today { border-color: #0d6e6e; box-shadow: inset 0 0 0 1px #0d6e6e; background: #f3fafa; }
+.calendar-day.flash { box-shadow: 0 0 0 3px rgba(13, 110, 110, .28); background: #eaf7f6; }
+.calendar-day-number { margin-bottom: 2px; color: #5c6b7a; font-size: .75rem; font-weight: 700; }
+.calendar-day.today .calendar-day-number { color: #0d6e6e; }
+.calendar-event-chip { display: block; width: 100%; margin: 3px 0 0; padding: 4px 6px; border: 0; border-radius: 6px; background: #e8f0fc; color: #1f5fbf; font-size: .7rem; font-weight: 600; line-height: 1.25; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.calendar-event-chip.allday { background: #f7efd9; color: #8a5a12; }
+.calendar-event-chip.recurring { background: #f1eaf8; color: #6b3fa0; }
+.calendar-event-chip.active { outline: 2px solid currentColor; outline-offset: 1px; }
+.calendar-more { width: 100%; padding: 2px 4px; border: 0; background: transparent; color: #5c6b7a; font-size: .7rem; text-align: left; cursor: pointer; }
+.calendar-detail { max-height: calc(100vh - 16px); }
+.calendar-detail-empty { padding: 28px 22px; color: #5c6b7a; min-height: 240px; }
+.calendar-detail-empty strong { display: block; margin-bottom: 8px; color: #1a2332; font-size: 1rem; }
+.calendar-detail-head { padding: 16px 18px 12px; border-bottom: 1px solid #d4dce6; background: linear-gradient(180deg, #f8fbfd, #fff); }
+.calendar-detail-kind { margin-bottom: 8px; font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.calendar-detail-head h3 { margin: 0 0 8px; font-family: Georgia, "Times New Roman", serif; font-size: 1.3rem; line-height: 1.2; color: #1a2332; font-weight: 700; }
+.calendar-detail-when { color: #5c6b7a; font-size: .88rem; }
+.calendar-detail-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 20px; }
+.calendar-detail-fields { margin: 0; }
+.calendar-detail-field { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-bottom: 1px solid #eef2f6; font-size: .82rem; }
+.calendar-detail-field:last-child { border-bottom: 0; }
+.calendar-detail-field dt { color: #5c6b7a; font-weight: 500; }
+.calendar-detail-field dd { margin: 0; color: #1a2332; overflow-wrap: anywhere; }
+.calendar-detail-section { margin-top: 14px; }
+.calendar-detail-section h4 { margin: 0 0 8px; font-size: .82rem; color: #243047; }
+.calendar-detail-section .body-block, .calendar-detail-section .meta-table { margin-top: 0; }
+.calendar-record-store { display: none; }
+.calendar-report-footer { margin: 18px 2px 8px; }
+@media (min-width: 1181px) { .calendar-shell { grid-template-columns: 240px minmax(0, 1.35fr) 320px; } .calendar-agenda, .calendar-detail { position: sticky; top: 14px; max-height: calc(100vh - 28px); } }
+@media (min-width: 821px) and (max-width: 1180px) { .calendar-shell { grid-template-columns: 220px minmax(0, 1fr); } .calendar-detail { grid-column: 1 / -1; max-height: none; } }
+@media (max-width: 820px) { .calendar-filter-grid { grid-template-columns: 1fr 1fr; } .calendar-month-grid { min-height: 0; } .calendar-day { min-height: 84px; } }
+@media (max-width: 560px) { .calendar-filter-grid { grid-template-columns: 1fr; } .calendar-weekdays, .calendar-month-grid { gap: 2px; } .calendar-day { min-height: 72px; padding: 4px; } .calendar-event-chip { font-size: .64rem; padding: 3px; } .calendar-detail-field { grid-template-columns: 1fr; gap: 2px; } }
+'@
+}
+
 function Get-CalendarReportScript {
     return @'
 (function () {
@@ -2455,8 +2531,23 @@ function Get-CalendarReportScript {
   const recurringSelect = document.getElementById('calendarRecurringFilter');
   const clearBtn = document.getElementById('calendarClearFiltersBtn');
   const visibleCount = document.getElementById('calendarVisibleCount');
+  const agendaCount = document.getElementById('calendarAgendaCount');
+  const agendaList = document.getElementById('calendarAgendaList');
+  const monthGrid = document.getElementById('calendarMonthGrid');
+  const monthLabel = document.getElementById('calendarMonthLabel');
+  const detail = document.getElementById('calendarDetail');
+  const previousMonth = document.getElementById('calendarPreviousMonth');
+  const nextMonth = document.getElementById('calendarNextMonth');
+  const todayButton = document.getElementById('calendarToday');
   const cards = Array.from(document.querySelectorAll('.record-card'));
   const totalCount = cards.length;
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const chipLimit = 3;
+  let filteredCards = [];
+  let currentMonth = null;
+  let selectedEntryId = '';
+  let flashTimer = null;
   let scheduled = false;
 
   cards.forEach(card => {
@@ -2467,11 +2558,265 @@ function Get-CalendarReportScript {
     card._itemType = (card.dataset.itemType || '').toLowerCase();
     card._allDay = (card.dataset.allDay || '').toLowerCase();
     card._recurring = (card.dataset.recurring || '').toLowerCase();
+    card._entryId = card.dataset.entryId || '';
+    card._subject = card.dataset.subject || '(no subject)';
+    card._location = card.dataset.location || '';
+    card._folderLabel = card.dataset.folderLabel || '';
+    card._startTime = card.dataset.startTime || '';
+    card._startDateTime = card.dataset.startDatetime || card._startDate;
+    card._itemTypeLabel = card.dataset.itemTypeLabel || card.dataset.itemType || 'Appointment';
   });
+
+  function chronologicalCards(list) {
+    return list.slice().sort((a, b) => {
+      const left = a._startDateTime || a._startDate || '';
+      const right = b._startDateTime || b._startDate || '';
+      if (left !== right) return left < right ? -1 : 1;
+      return String(a._subject || '').localeCompare(String(b._subject || ''));
+    });
+  }
+
+  function kindColor(card) {
+    const kind = eventClass(card);
+    if (kind === 'allday') return '#8a5a12';
+    if (kind === 'recurring') return '#6b3fa0';
+    return '#1f5fbf';
+  }
+
+  function fieldValueMap(card) {
+    const values = {};
+    card.querySelectorAll('.detail-field').forEach(field => {
+      const labelNode = field.querySelector('.detail-label');
+      const valueNode = field.querySelector('.detail-value');
+      const label = labelNode ? String(labelNode.textContent).trim() : '';
+      if (label && valueNode) values[label] = valueNode.innerHTML;
+    });
+    return values;
+  }
 
   function updateVisibleCount(shown) {
     if (!visibleCount) return;
     visibleCount.textContent = shown + ' of ' + totalCount + ' records shown';
+  }
+
+  function parseDateKey(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || '');
+    return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+  }
+
+  function dateKey(date) {
+    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+  }
+
+  function sameMonth(date, month) {
+    return date && month && date.getFullYear() === month.getFullYear() && date.getMonth() === month.getMonth();
+  }
+
+  function earliestVisibleMonth() {
+    const first = filteredCards.find(card => parseDateKey(card._startDate));
+    const date = first ? parseDateKey(first._startDate) : new Date();
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  }
+
+  function eventClass(card) {
+    if (card._recurring === 'yes') return 'recurring';
+    if (card._allDay === 'yes') return 'allday';
+    return 'meeting';
+  }
+
+  function shortTime(card) {
+    return card._allDay === 'yes' ? 'All day' : (card._startTime || 'Time unavailable');
+  }
+
+  function createAgendaItem(card) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'calendar-agenda-item ' + eventClass(card);
+    item.setAttribute('data-entry-id', card._entryId);
+    item.addEventListener('click', () => selectEvent(card._entryId, 'agenda'));
+
+    const rail = document.createElement('span');
+    rail.className = 'calendar-agenda-rail';
+    rail.setAttribute('aria-hidden', 'true');
+    const content = document.createElement('span');
+    const time = document.createElement('span');
+    time.className = 'calendar-agenda-time';
+    time.textContent = shortTime(card);
+    const title = document.createElement('span');
+    title.className = 'calendar-agenda-title';
+    title.textContent = card._subject;
+    const place = document.createElement('span');
+    place.className = 'calendar-agenda-place';
+    place.textContent = card._location || card._folderLabel || '(no location)';
+    content.append(time, title, place);
+    item.append(rail, content);
+    return item;
+  }
+
+  function renderAgenda() {
+    agendaList.replaceChildren();
+    const agendaCards = chronologicalCards(filteredCards);
+    if (agendaCount) agendaCount.textContent = agendaCards.length + ' items';
+    if (!agendaCards.length) {
+      const empty = document.createElement('div');
+      empty.className = 'calendar-agenda-empty';
+      empty.textContent = 'No matching scheduled meetings.';
+      agendaList.appendChild(empty);
+      return;
+    }
+
+    let lastDate = '';
+    agendaCards.forEach(card => {
+      if (card._startDate !== lastDate) {
+        const date = parseDateKey(card._startDate);
+        const group = document.createElement('div');
+        group.className = 'calendar-agenda-group';
+        group.textContent = date
+          ? weekdayNames[date.getDay()] + ', ' + monthNames[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear()
+          : 'Date unavailable';
+        agendaList.appendChild(group);
+        lastDate = card._startDate;
+      }
+      agendaList.appendChild(createAgendaItem(card));
+    });
+    syncSelectionClasses();
+  }
+
+  function createEventChip(card) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'calendar-event-chip ' + eventClass(card);
+    chip.setAttribute('data-entry-id', card._entryId);
+    chip.textContent = (card._allDay === 'yes' ? '' : shortTime(card) + ' · ') + card._subject;
+    chip.title = card._subject;
+    chip.addEventListener('click', () => selectEvent(card._entryId, 'month'));
+    return chip;
+  }
+
+  function renderMonth() {
+    monthGrid.replaceChildren();
+    monthLabel.textContent = monthNames[currentMonth.getMonth()] + ' ' + currentMonth.getFullYear();
+    const first = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const gridStart = new Date(first.getFullYear(), first.getMonth(), 1 - first.getDay());
+    const todayKey = dateKey(new Date());
+
+    for (let offset = 0; offset < 42; offset += 1) {
+      const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + offset);
+      const key = dateKey(date);
+      const day = document.createElement('div');
+      day.className = 'calendar-day' + (sameMonth(date, currentMonth) ? '' : ' outside') + (key === todayKey ? ' today' : '');
+      day.dataset.date = key;
+      const number = document.createElement('div');
+      number.className = 'calendar-day-number';
+      number.textContent = String(date.getDate());
+      day.appendChild(number);
+
+      const dayCards = filteredCards.filter(card => card._startDate === key);
+      const shownCards = dayCards.slice(0, chipLimit);
+      const selectedCard = dayCards.find(card => card._entryId === selectedEntryId);
+      if (selectedCard && shownCards.indexOf(selectedCard) === -1 && shownCards.length === chipLimit) {
+        shownCards[chipLimit - 1] = selectedCard;
+      }
+      shownCards.forEach(card => day.appendChild(createEventChip(card)));
+      if (dayCards.length > chipLimit) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'calendar-more';
+        more.textContent = '+' + (dayCards.length - chipLimit) + ' more';
+        more.addEventListener('click', () => selectEvent(dayCards[chipLimit]._entryId, 'month'));
+        day.appendChild(more);
+      }
+      monthGrid.appendChild(day);
+    }
+    syncSelectionClasses();
+  }
+
+  function syncSelectionClasses() {
+    document.querySelectorAll('.calendar-agenda-item, .calendar-event-chip').forEach(item => {
+      item.classList.toggle('active', item.dataset.entryId === selectedEntryId);
+    });
+  }
+
+  function showDetail(card) {
+    const values = fieldValueMap(card);
+    const date = parseDateKey(card._startDate);
+    const dateText = date
+      ? weekdayNames[date.getDay()] + ', ' + monthNames[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear()
+      : '';
+    const startText = values.Start || shortTime(card);
+    const endText = values.End || '';
+    const whenText = [dateText, startText && endText ? (startText + ' – ' + endText) : (startText || endText)]
+      .filter(Boolean)
+      .join(' · ');
+    const preferredLabels = [
+      'Location', 'Organizer', 'Required attendees', 'Optional attendees',
+      'Recurrence summary', 'Categories', 'Sensitivity', 'Folder',
+      'All-day', 'Created', 'Modified'
+    ];
+    const fieldHtml = preferredLabels
+      .filter(label => {
+        if (!Object.prototype.hasOwnProperty.call(values, label)) return false;
+        if (label === 'All-day' && card._allDay !== 'yes') return false;
+        return true;
+      })
+      .map(label => "<div class='calendar-detail-field'><dt>" + label + "</dt><dd>" + values[label] + "</dd></div>")
+      .join('');
+    let extras = '';
+    Array.from(card.querySelectorAll('.record-section')).forEach(section => {
+      const heading = section.querySelector('h3');
+      let title = '';
+      if (heading) title = String(heading.textContent).trim();
+      if (!title) return;
+      const clone = section.cloneNode(true);
+      const cloneHeading = clone.querySelector('h3');
+      if (cloneHeading) cloneHeading.remove();
+      extras += "<section class='calendar-detail-section'><h4>" + title + "</h4>" + clone.innerHTML + "</section>";
+    });
+
+    detail.innerHTML =
+      "<div class='calendar-detail-head'>" +
+        "<div class='calendar-detail-kind' style='color:" + kindColor(card) + "'>" + (card._itemTypeLabel || 'Appointment') + "</div>" +
+        "<h3></h3>" +
+        "<div class='calendar-detail-when'></div>" +
+      "</div>" +
+      "<div class='calendar-detail-body'>" +
+        "<dl class='calendar-detail-fields'>" + fieldHtml + "</dl>" +
+        extras +
+      "</div>";
+    detail.querySelector('h3').textContent = card._subject;
+    detail.querySelector('.calendar-detail-when').textContent = whenText || 'Time unavailable';
+  }
+
+  function findByEntryId(selector, entryId) {
+    return Array.from(document.querySelectorAll(selector)).find(item => item.dataset.entryId === entryId);
+  }
+
+  function selectEvent(entryId, source) {
+    const card = cards.find(item => item._entryId === entryId);
+    if (!card) return;
+    selectedEntryId = entryId;
+    const eventDate = parseDateKey(card._startDate);
+    if (eventDate && !sameMonth(eventDate, currentMonth)) {
+      currentMonth = new Date(eventDate.getFullYear(), eventDate.getMonth(), 1);
+    }
+    renderMonth();
+    showDetail(card);
+    syncSelectionClasses();
+
+    if (source === 'agenda') {
+      const day = Array.from(monthGrid.querySelectorAll('.calendar-day')).find(cell => cell.dataset.date === card._startDate);
+      if (day) {
+        day.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        day.classList.remove('flash');
+        void day.offsetWidth;
+        day.classList.add('flash');
+        if (flashTimer) clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => day.classList.remove('flash'), 900);
+      }
+    } else {
+      const agendaItem = findByEntryId('.calendar-agenda-item', entryId);
+      if (agendaItem) agendaItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   }
 
   function matchesDateRange(card, fromDate, toDate) {
@@ -2488,20 +2833,29 @@ function Get-CalendarReportScript {
     const itemType = typeSelect ? (typeSelect.value || '').toLowerCase() : '';
     const allDay = allDaySelect ? (allDaySelect.value || '') : '';
     const recurring = recurringSelect ? (recurringSelect.value || '') : '';
-    let shown = 0;
-
-    cards.forEach(card => {
-      const show = (!query || card._search.indexOf(query) !== -1)
+    filteredCards = cards.filter(card => {
+      return (!query || card._search.indexOf(query) !== -1)
         && (!folder || card._folder === folder)
         && (!itemType || card._itemType === itemType)
         && (!allDay || card._allDay === allDay)
         && (!recurring || card._recurring === recurring)
         && matchesDateRange(card, fromDate, toDate);
-      card.hidden = !show;
-      if (show) shown += 1;
     });
 
-    updateVisibleCount(shown);
+    cards.forEach(card => { card.hidden = filteredCards.indexOf(card) === -1; });
+    updateVisibleCount(filteredCards.length);
+    if (!currentMonth || (filteredCards.length && !filteredCards.some(card => sameMonth(parseDateKey(card._startDate), currentMonth)))) {
+      currentMonth = earliestVisibleMonth();
+    }
+    if (selectedEntryId && !filteredCards.some(card => card._entryId === selectedEntryId)) {
+      selectedEntryId = '';
+      detail.innerHTML = "<div class='calendar-detail-empty'><strong>Select an appointment</strong>Use the agenda or a month chip to view all exported fields.</div>";
+    }
+    renderAgenda();
+    renderMonth();
+    if (!selectedEntryId && filteredCards.length) {
+      selectEvent(chronologicalCards(filteredCards)[0]._entryId, 'filter');
+    }
   }
 
   function scheduleApply() {
@@ -2532,6 +2886,22 @@ function Get-CalendarReportScript {
   if (allDaySelect) allDaySelect.addEventListener('change', applyFilters);
   if (recurringSelect) recurringSelect.addEventListener('change', applyFilters);
   if (clearBtn) clearBtn.addEventListener('click', resetFilters);
+  if (previousMonth) previousMonth.addEventListener('click', () => {
+    currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+    renderAgenda();
+    renderMonth();
+  });
+  if (nextMonth) nextMonth.addEventListener('click', () => {
+    currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+    renderAgenda();
+    renderMonth();
+  });
+  if (todayButton) todayButton.addEventListener('click', () => {
+    const today = new Date();
+    currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    renderAgenda();
+    renderMonth();
+  });
 
   requestAnimationFrame(applyFilters);
 })();
@@ -2625,7 +2995,7 @@ function Write-CalendarReportHeader {
     )
 
     $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    $css = Get-StaticRecordReportCss
+    $css = Get-CalendarReportCss
     $Writer.WriteLine(@"
 <!doctype html>
 <html lang='en'>
@@ -2641,7 +3011,7 @@ $css
 <div class='page'>
   <header class='hero'>
     <h1>Microsoft Purview eDiscovery Calendar Report</h1>
-    <p>Static offline review of calendar appointments and meeting items with client-side search and filters.</p>
+    <p>Static offline month grid, chronological agenda, and appointment detail with client-side search and filters.</p>
     <div class='hero-credit'>By Patrick Bush</div>
   </header>
 
@@ -2654,15 +3024,26 @@ $css
     <div class='summary-card'><div class='label'>Recurring items</div><div class='value'>$(ConvertTo-HtmlEncodedText (@($SortedRecords | Where-Object { $_.IsRecurring }).Count))</div></div>
   </section>
 
-  <div class='review-layout'>
-    <aside class='filter-panel' aria-label='Calendar filters'>
-      <div class='filter-title'>
-        <h2>Filter calendar records</h2>
-        <span id='calendarVisibleCount' class='result-count'></span>
+  <div class='calendar-shell'>
+    <aside id='calendarAgenda' class='calendar-panel calendar-agenda' aria-label='Calendar agenda'>
+      <div class='calendar-panel-heading'>
+        <h2>Scheduled meetings</h2>
+        <p>All matching meetings in chronological order</p>
+        <span id='calendarAgendaCount' class='calendar-agenda-count'></span>
       </div>
-      <p class='filter-help'>Search is precomputed from normalized calendar fields. Date filtering is applied entirely in the browser using per-record start and end dates.</p>
-      <div class='filter-stack'>
-        <div class='filter-grid'>
+      <div id='calendarAgendaList' class='calendar-agenda-list'></div>
+    </aside>
+
+    <main class='calendar-panel calendar-month-panel' aria-label='Calendar month'>
+      <section class='calendar-toolbar' aria-label='Calendar navigation and filters'>
+        <div class='calendar-nav'>
+          <button type='button' class='secondary' id='calendarPreviousMonth' aria-label='Previous month'>&lsaquo;</button>
+          <h2 id='calendarMonthLabel'>Calendar</h2>
+          <button type='button' class='secondary' id='calendarNextMonth' aria-label='Next month'>&rsaquo;</button>
+          <button type='button' id='calendarToday'>Today</button>
+          <span id='calendarVisibleCount' class='result-count'></span>
+        </div>
+        <div class='calendar-filter-grid'>
           <label for='calendarSearch'>Search
             <input id='calendarSearch' type='search' placeholder='Subject, people, notes, folder, ID' autocomplete='off'/>
           </label>
@@ -2698,16 +3079,30 @@ $($TypeOptions -join "`n")
               <option value='no'>No</option>
             </select>
           </label>
+          <div class='calendar-filter-actions'>
+            <button type='button' class='secondary' id='calendarClearFiltersBtn'>Clear filters</button>
+          </div>
         </div>
-        <div class='filter-actions'>
-          <button type='button' class='secondary' id='calendarClearFiltersBtn'>Clear filters</button>
-        </div>
+      </section>
+      <div class='calendar-legend' aria-label='Calendar item legend'>
+        <span><i style='background:#1f5fbf'></i>Meeting</span>
+        <span><i style='background:#8a5a12'></i>All-day</span>
+        <span><i style='background:#6b3fa0'></i>Recurring</span>
       </div>
-      <div class='footer'>Log file: $(ConvertTo-HtmlEncodedText $LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
-    </aside>
+      <section class='calendar-month'>
+        <div class='calendar-weekdays' aria-hidden='true'>
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div id='calendarMonthGrid' class='calendar-month-grid'></div>
+      </section>
+    </main>
 
-    <main class='conversation-pane' aria-label='Calendar records'>
-      <section id='calendarRecordList' class='record-list'>
+    <aside id='calendarDetail' class='calendar-panel calendar-detail' aria-label='Selected calendar record'>
+      <div class='calendar-detail-empty'><strong>Select an appointment</strong>Use the agenda or a month chip to view all exported fields.</div>
+    </aside>
+  </div>
+  <div class='footer calendar-report-footer'>Log file: $(ConvertTo-HtmlEncodedText $LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
+  <section id='calendarRecordList' class='calendar-record-store' aria-hidden='true'>
 "@)
 }
 
@@ -2807,10 +3202,28 @@ $ScriptText
 "@)
 }
 
+function Write-CalendarReportFooter {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)][string]$ScriptText
+    )
+
+    $Writer.WriteLine(@"
+  </section>
+</div>
+<script>
+$ScriptText
+</script>
+</body>
+</html>
+"@)
+}
+
 function Write-CalendarRecordHtml {
     param(
         [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
-        [Parameter(Mandatory = $true)]$Record
+        [Parameter(Mandatory = $true)]$Record,
+        [int]$RecordIndex = 0
     )
 
     $subject = if ([string]::IsNullOrWhiteSpace([string]$Record.Subject)) { '(no subject)' } else { [string]$Record.Subject }
@@ -2823,6 +3236,11 @@ function Write-CalendarRecordHtml {
     $recurring = if ($Record.IsRecurring) { 'yes' } else { 'no' }
     $sensitivityText = Get-CalendarSensitivityLabel $Record.Sensitivity
     $folderText = [string](Get-PropSafe -Object $Record -Name 'FolderPath' -Default '')
+    $entryIdText = [string](Get-PropSafe -Object $Record -Name 'EntryId' -Default '')
+    $stableEntryId = if ([string]::IsNullOrWhiteSpace($entryIdText)) { "calendar-record-$RecordIndex" } else { $entryIdText }
+    $locationText = [string](Get-PropSafe -Object $Record -Name 'Location' -Default '')
+    $startTimeText = if (Test-MissingDate $Record.StartTime) { '' } elseif ($Record.AllDayEvent) { 'All day' } else { ([datetime]$Record.StartTime).ToString('h:mm tt') }
+    $startDateTime = if (Test-MissingDate $Record.StartTime) { '' } else { ([datetime]$Record.StartTime).ToString('yyyy-MM-ddTHH:mm:ss') }
     $searchParts = @(
         $subject, $typeText, $startDisplay, $endDisplay, $Record.Location, $Record.Organizer,
         $Record.RequiredAttendees, $Record.OptionalAttendees, $Record.RecurrenceSummary,
@@ -2840,7 +3258,7 @@ function Write-CalendarRecordHtml {
     $subtitleParts = @($startDisplay, $endDisplay, $folderText | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $subtitle = if ($subtitleParts.Count -gt 0) { $subtitleParts -join ' | ' } else { '' }
     $Writer.WriteLine(@"
-<article class='conversation record-card' data-search='$(ConvertTo-HtmlEncodedText $searchText)' data-start-date='$(ConvertTo-HtmlEncodedText $startDate)' data-end-date='$(ConvertTo-HtmlEncodedText $endDate)' data-folder='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $folderText))' data-item-type='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $typeText))' data-all-day='$(ConvertTo-HtmlEncodedText $allDay)' data-recurring='$(ConvertTo-HtmlEncodedText $recurring)'>
+<article class='conversation record-card' data-entry-id='$(ConvertTo-HtmlEncodedText $stableEntryId)' data-search='$(ConvertTo-HtmlEncodedText $searchText)' data-start-date='$(ConvertTo-HtmlEncodedText $startDate)' data-start-datetime='$(ConvertTo-HtmlEncodedText $startDateTime)' data-start-time='$(ConvertTo-HtmlEncodedText $startTimeText)' data-end-date='$(ConvertTo-HtmlEncodedText $endDate)' data-folder='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $folderText))' data-folder-label='$(ConvertTo-HtmlEncodedText $folderText)' data-item-type='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $typeText))' data-item-type-label='$(ConvertTo-HtmlEncodedText $typeText)' data-all-day='$(ConvertTo-HtmlEncodedText $allDay)' data-recurring='$(ConvertTo-HtmlEncodedText $recurring)' data-subject='$(ConvertTo-HtmlEncodedText $subject)' data-location='$(ConvertTo-HtmlEncodedText $locationText)'>
   <header class='record-header'>
     <div>
       <h2>$(ConvertTo-HtmlEncodedText $subject)</h2>
@@ -2994,14 +3412,14 @@ function Write-CalendarHtmlReport {
         $writtenCount = 0
         $totalCount = [Math]::Max(1, $sorted.Count)
         foreach ($record in $sorted) {
-            Write-CalendarRecordHtml -Writer $writer -Record $record
+            Write-CalendarRecordHtml -Writer $writer -Record $record -RecordIndex $writtenCount
             $writtenCount++
             if (($writtenCount -eq $totalCount) -or ($writtenCount % 100 -eq 0)) {
                 Write-ReportLog "Calendar HTML report progress: $writtenCount of $totalCount records."
                 Write-ConversionStage -Stage 'WritingReport' -Extra ("Written={0}|Total={1}" -f $writtenCount, $totalCount)
             }
         }
-        Write-StaticRecordReportFooter -Writer $writer -ScriptText (Get-CalendarReportScript)
+        Write-CalendarReportFooter -Writer $writer -ScriptText (Get-CalendarReportScript)
     }
     finally {
         $writer.Dispose()

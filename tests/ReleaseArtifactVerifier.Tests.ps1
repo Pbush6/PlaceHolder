@@ -51,7 +51,7 @@ Describe 'Release artifact verification contracts' {
             $pwshArguments += @(
                 '-NoProfile', '-File', $script:verifierPath,
                 '-ZipPath', $zipPath,
-                '-ExpectedVersion', '1.2.0.0',
+                '-ExpectedVersion', '1.2.1.0',
                 '-ConverterInputPath', $inputPath,
                 '-DebugConverterInputPath', $inputPath,
                 '-ViewerInputPath', $inputPath,
@@ -92,7 +92,7 @@ Describe 'Release artifact verification contracts' {
         $output = @(
             & pwsh -NoProfile -File $script:verifierPath `
                 -ZipPath $missingZip `
-                -ExpectedVersion '1.2.0.0' `
+                -ExpectedVersion '1.2.1.0' `
                 -ConverterInputPath $script:verifierPath `
                 -DebugConverterInputPath $script:verifierPath `
                 -ViewerInputPath $script:verifierPath 2>&1
@@ -315,10 +315,10 @@ Describe 'Release artifact verification contracts' {
         (Test-Path -LiteralPath (Join-Path $script:repoRoot 'test-output\verify-stop-process-tree.html')) | Should -BeFalse
     }
 
-    It 'documents completed 1.2.0.0 version alignment without stale drift language' {
+    It 'documents completed 1.2.1.0 version alignment without stale drift language' {
         $text = Get-Content -LiteralPath $script:contractsPath -Raw
-        $text | Should -Match '\*\*Version:\*\*\s*1\.2\.0\.0'
-        $text | Should -Match '1\.2\.0\.0'
+        $text | Should -Match '\*\*Version:\*\*\s*1\.2\.1\.0'
+        $text | Should -Match '1\.2\.1\.0'
         $text | Should -Not -Match 'Current drift to resolve before release'
     }
 }

@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calendar, and Contacts reports.
 
-**Current version:** 1.2.0.0
+**Current version:** 1.2.1.0
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -11,7 +11,7 @@ Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calend
 - All four report types are selected by default and are produced in one PST scan.
 - Writes Teams items to `Base_Teams.html`.
 - Writes Email items to `Base_Email.db`; Email HTML is no longer generated.
-- Writes appointments and meetings to `Base_Calendar.html`.
+- Writes appointments and meetings to `Base_Calendar.html` with a month grid, chronological agenda, and synchronized detail pane.
 - Writes contacts and distribution lists to `Base_Contacts.html`.
 - Exports Teams items from `TeamsMessagesData`, `TeamsMeetings`, `Migrated-Teams-Chat`, or `SubstrateHolds`.
 - Exports Email items when that report is enabled using the message-class classifier (`IPM.Note*`, excluding meeting classes).
@@ -75,7 +75,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.2.0.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.2.1.0
 ```
 
 Outputs:
@@ -120,7 +120,7 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 - Any subset may be selected; only those reports and logs are written. If all four are unchecked, the core exits with `CONVERSION_ERROR`.
 - Email records are staged as UTF-8 NDJSON, imported into a temporary SQLite database, count-validated, then renamed into place.
 - Teams HTML supports participant/conversation text search plus date and sort filters.
-- Calendar HTML supports search plus date, folder, item-type, all-day, and recurring filters.
+- Calendar HTML provides a navigable month grid, a scrollable chronological agenda of all matching meetings, and a sticky appointment detail pane. Agenda rows and month chips share selection; clicking an agenda item outside the visible month jumps the grid to that month. Search, date, folder, item-type, all-day, and recurring filters update both views.
 - Contacts HTML supports text search plus folder and category filters.
 - Email Review Viewer provides SQLite FTS5 search, folder filtering, date filtering, sorting, paging, and on-demand message detail.
 - After a successful conversion, the GUI opens Teams, Calendar, and Contacts HTML in the default browser and opens Email databases in `EmailReviewViewer.App.exe`. Reports are not launched after a failed or incomplete conversion.
@@ -134,7 +134,12 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
 
-## Recent changes (2026-07-29)
+## Recent changes (2026-07-30)
+
+- Version 1.2.1.0 redesigns Calendar review as a three-pane month grid, chronological agenda of all matching meetings, and synchronized appointment detail pane.
+- Detail fields omit Message class and Entry ID; All-day appears only for all-day appointments.
+
+## Earlier changes (2026-07-29)
 
 - Version 1.2.0.0 adds searchable Calendar and Contacts HTML reports.
 - All four report types are selected by default, share one PST scan, and receive typed output/log paths.

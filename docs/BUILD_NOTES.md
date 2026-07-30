@@ -2,6 +2,12 @@
 
 Generated: 2026-07-03
 
+## Version 1.2.1.0 packaging (2026-07-30)
+
+- Calendar HTML report ships the A2 three-pane UX: skinny chronological agenda (all matching meetings), month grid, and sticky detail pane.
+- Detail pane omits Message class and Entry ID; All-day is shown only for all-day appointments.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.2.1.0-win-x64.zip`.
+
 ## Version 1.2.0.0 packaging (2026-07-29)
 
 - Builds the converter with the current embedded four-report core.
