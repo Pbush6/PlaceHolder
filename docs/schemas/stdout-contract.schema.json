@@ -10,18 +10,16 @@
     { "$ref": "#/$defs/errorLine" }
   ],
   "$defs": {
-    "runIdField": {
-      "type": "object",
-      "properties": {
-        "RunId": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
-      },
-      "additionalProperties": true
+    "runId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
     },
     "progressLine": {
       "type": "object",
       "required": ["prefix", "ItemsAttempted", "ItemsExported", "FoldersScanned", "ItemReadFailures", "ElapsedSeconds", "RatePerMinute", "FolderPath"],
       "properties": {
         "prefix": { "const": "CONVERSION_PROGRESS" },
+        "RunId": { "$ref": "#/$defs/runId" },
         "ItemsAttempted": { "type": "integer", "minimum": 0 },
         "ItemsExported": { "type": "integer", "minimum": 0 },
         "FoldersScanned": { "type": "integer", "minimum": 0 },
@@ -29,48 +27,67 @@
         "ElapsedSeconds": { "type": "integer", "minimum": 1 },
         "RatePerMinute": { "type": "number", "minimum": 0 },
         "FolderPath": { "type": "string" }
-      }
+      },
+      "additionalProperties": false
     },
     "stageLine": {
       "type": "object",
       "required": ["prefix", "Stage"],
       "properties": {
         "prefix": { "const": "CONVERSION_STAGE" },
+        "RunId": { "$ref": "#/$defs/runId" },
         "Stage": {
           "type": "string",
           "enum": ["FinishedReading", "PreparingReport", "WritingReport", "Finalizing", "ImportingEmailDatabase", "Detaching", "ReportWritten"]
         },
         "Written": { "type": "integer", "minimum": 0 },
         "Total": { "type": "integer", "minimum": 0 }
-      }
+      },
+      "additionalProperties": false
     },
     "resultLine": {
       "type": "object",
-      "required": ["prefix", "OutputPath", "LogPath", "ItemsExported", "ItemReadFailures", "AttachmentReadFailures", "SubfolderScanFailures"],
+      "required": [
+        "prefix", "OutputPath", "LogPath", "ItemsExported",
+        "TeamsOutputPath", "EmailOutputPath", "CalendarOutputPath", "ContactsOutputPath",
+        "TeamsLogPath", "EmailLogPath", "CalendarLogPath", "ContactsLogPath",
+        "TeamsItemsExported", "EmailItemsExported", "CalendarItemsExported", "ContactsItemsExported",
+        "ItemReadFailures", "AttachmentReadFailures", "SubfolderScanFailures"
+      ],
       "properties": {
         "prefix": { "const": "CONVERSION_RESULT" },
+        "RunId": { "$ref": "#/$defs/runId" },
         "OutputPath": { "type": "string", "minLength": 1 },
         "LogPath": { "type": "string", "minLength": 1 },
-        "TeamsOutputPath": { "type": "string", "minLength": 1 },
-        "EmailOutputPath": { "type": "string", "minLength": 1 },
-        "TeamsLogPath": { "type": "string", "minLength": 1 },
-        "EmailLogPath": { "type": "string", "minLength": 1 },
+        "TeamsOutputPath": { "type": "string" },
+        "EmailOutputPath": { "type": "string" },
+        "CalendarOutputPath": { "type": "string" },
+        "ContactsOutputPath": { "type": "string" },
+        "TeamsLogPath": { "type": "string" },
+        "EmailLogPath": { "type": "string" },
+        "CalendarLogPath": { "type": "string" },
+        "ContactsLogPath": { "type": "string" },
         "ItemsExported": { "type": "integer", "minimum": 0 },
         "TeamsItemsExported": { "type": "integer", "minimum": 0 },
         "EmailItemsExported": { "type": "integer", "minimum": 0 },
+        "CalendarItemsExported": { "type": "integer", "minimum": 0 },
+        "ContactsItemsExported": { "type": "integer", "minimum": 0 },
         "ItemReadFailures": { "type": "integer", "minimum": 0 },
         "AttachmentReadFailures": { "type": "integer", "minimum": 0 },
         "SubfolderScanFailures": { "type": "integer", "minimum": 0 }
-      }
+      },
+      "additionalProperties": false
     },
     "errorLine": {
       "type": "object",
       "required": ["prefix", "ExitCode", "Message"],
       "properties": {
         "prefix": { "const": "CONVERSION_ERROR" },
+        "RunId": { "$ref": "#/$defs/runId" },
         "ExitCode": { "type": "string", "pattern": "^[0-9]+$" },
         "Message": { "type": "string", "minLength": 1, "maxLength": 500 }
-      }
+      },
+      "additionalProperties": false
     }
   }
 }

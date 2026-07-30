@@ -58,8 +58,23 @@ param(
     [bool]$TeamsReport = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$EmailReport = $true
+    [bool]$EmailReport = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$CalendarReport = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$ContactsReport = $true
 )
+
+$legacyReportFlagBound = $PSBoundParameters.ContainsKey('TeamsReport') -or $PSBoundParameters.ContainsKey('EmailReport')
+$newReportFlagBound = $PSBoundParameters.ContainsKey('CalendarReport') -or $PSBoundParameters.ContainsKey('ContactsReport')
+if ($legacyReportFlagBound -and -not $newReportFlagBound) {
+    # Compatibility for pre-Calendar/Contacts direct callers: explicitly binding either
+    # legacy report flag without either new flag retains the historical two-report surface.
+    $CalendarReport = $false
+    $ContactsReport = $false
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -72,6 +87,8 @@ $script:Stats = [ordered]@{
     ItemsSkipped            = 0
     TeamsItemsExported      = 0
     EmailItemsExported      = 0
+    CalendarItemsExported   = 0
+    ContactsItemsExported   = 0
     ItemReadFailures        = 0
     AttachmentReadFailures  = 0
     SubfolderScanFailures   = 0
@@ -430,33 +447,51 @@ function Format-ParticipantPreview {
 function Get-AttachmentSummaryHtml {
     param([AllowNull()][object]$Item)
 
+    $rows = New-Object System.Collections.Generic.List[string]
+    foreach ($attachment in @(Get-AttachmentMetadata -Item $Item)) {
+        [void]$rows.Add(('<tr><td>{0}</td><td>{1}</td><td>{2}</td></tr>' -f (ConvertTo-HtmlEncodedText $attachment.FileName), (ConvertTo-HtmlEncodedText $attachment.DisplayName), (ConvertTo-HtmlEncodedText $attachment.Size)))
+    }
+    if ($rows.Count -le 0) { return '' }
+    return "<div class='attachments'><strong>Attachments:</strong><table><thead><tr><th>File name</th><th>Display name</th><th>Size bytes</th></tr></thead><tbody>$($rows -join "`n")</tbody></table></div>"
+}
+
+function Get-AttachmentMetadata {
+    param([AllowNull()][object]$Item)
+
     $attachments = $null
+    $metadata = New-Object System.Collections.Generic.List[object]
     try {
-        $attachments = $Item.Attachments
-        $count = [int]$attachments.Count
-        if ($count -le 0) { return '' }
-        $rows = New-Object System.Collections.Generic.List[string]
+        $attachments = Get-PropSafe -Object $Item -Name 'Attachments' -Default $null
+        if ($null -eq $attachments) { return @() }
+        $count = [int](Get-PropSafe -Object $attachments -Name 'Count' -Default 0)
+        if ($count -le 0) { return @() }
         for ($i = 1; $i -le $count; $i++) {
-            $att = $null
+            $attachment = $null
             try {
-                $att = $attachments.Item($i)
-                [void]$rows.Add(('<tr><td>{0}</td><td>{1}</td><td>{2}</td></tr>' -f (ConvertTo-HtmlEncodedText $att.FileName), (ConvertTo-HtmlEncodedText $att.DisplayName), (ConvertTo-HtmlEncodedText $att.Size)))
+                $attachment = $attachments.Item($i)
+                [void]$metadata.Add([pscustomobject]@{
+                    FileName = [string](Get-PropSafe -Object $attachment -Name 'FileName' -Default '')
+                    DisplayName = [string](Get-PropSafe -Object $attachment -Name 'DisplayName' -Default '')
+                    Size = (Get-PropSafe -Object $attachment -Name 'Size' -Default $null)
+                })
             }
             catch {
                 $script:Stats.AttachmentReadFailures++
                 Write-ReportLog "Could not read attachment $i on item. $($_.Exception.Message)" 'WARN'
             }
-            finally { Close-ComObjectSafe $att }
+            finally {
+                Close-ComObjectSafe $attachment
+            }
         }
-        return "<div class='attachments'><strong>Attachments:</strong><table><thead><tr><th>File name</th><th>Display name</th><th>Size bytes</th></tr></thead><tbody>$($rows -join "`n")</tbody></table></div>"
     }
     catch {
         $script:Stats.AttachmentReadFailures++
-        return ''
+        Write-ReportLog "Could not enumerate attachments on item. $($_.Exception.Message)" 'WARN'
     }
     finally {
         Close-ComObjectSafe $attachments
     }
+    return $metadata.ToArray()
 }
 
 function Test-MissingDate {
@@ -472,11 +507,11 @@ function Test-MissingDate {
 # ponytail: keep in sync with ReportPathNaming.ps1
 function Get-ReportPathBaseName {
     param([Parameter(Mandatory = $true)][string]$FilePath)
-    $dir = [IO.Path]::GetDirectoryName($FilePath)
     $name = [IO.Path]::GetFileNameWithoutExtension($FilePath)
-    $ext = [IO.Path]::GetExtension($FilePath)
     if ($name -match '(?i)_Teams$') { $name = $name.Substring(0, $name.Length - 6) }
     elseif ($name -match '(?i)_Email$') { $name = $name.Substring(0, $name.Length - 6) }
+    elseif ($name -match '(?i)_Calendar$') { $name = $name.Substring(0, $name.Length - 9) }
+    elseif ($name -match '(?i)_Contacts$') { $name = $name.Substring(0, $name.Length - 9) }
     return $name
 }
 
@@ -485,10 +520,12 @@ function Get-ReportOutputPaths {
     param(
         [Parameter(Mandatory = $true)][string]$DisplayPath,
         [Parameter(Mandatory = $true)][bool]$TeamsReport,
-        [Parameter(Mandatory = $true)][bool]$EmailReport
+        [Parameter(Mandatory = $true)][bool]$EmailReport,
+        [bool]$CalendarReport = $false,
+        [bool]$ContactsReport = $false
     )
-    if (-not $TeamsReport -and -not $EmailReport) {
-        throw 'At least one of TeamsReport or EmailReport must be true.'
+    if (-not $TeamsReport -and -not $EmailReport -and -not $CalendarReport -and -not $ContactsReport) {
+        throw 'At least one report type must be selected.'
     }
     $dir = [IO.Path]::GetDirectoryName($DisplayPath)
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
@@ -496,25 +533,23 @@ function Get-ReportOutputPaths {
     $isLogPath = $inputExt -in @('.log', '.txt')
     $teamsExt = if ($isLogPath) { $inputExt } else { '.html' }
     $emailExt = if ($isLogPath) { $inputExt } else { '.db' }
+    $calendarExt = if ($isLogPath) { $inputExt } else { '.html' }
+    $contactsExt = if ($isLogPath) { $inputExt } else { '.html' }
     $displayExt = if ($isLogPath) { $inputExt } else { '.html' }
     $base = Get-ReportPathBaseName -FilePath $DisplayPath
-    $teamsPath = $null
-    $emailPath = $null
-    $display = $null
-    if ($TeamsReport -and $EmailReport) {
-        $display = Join-Path $dir ($base + $displayExt)
-        $teamsPath = Join-Path $dir ($base + '_Teams' + $teamsExt)
-        $emailPath = Join-Path $dir ($base + '_Email' + $emailExt)
+    $teamsPath = if ($TeamsReport) { Join-Path $dir ($base + '_Teams' + $teamsExt) } else { $null }
+    $emailPath = if ($EmailReport) { Join-Path $dir ($base + '_Email' + $emailExt) } else { $null }
+    $calendarPath = if ($CalendarReport) { Join-Path $dir ($base + '_Calendar' + $calendarExt) } else { $null }
+    $contactsPath = if ($ContactsReport) { Join-Path $dir ($base + '_Contacts' + $contactsExt) } else { $null }
+    $selectedPaths = @(@($teamsPath, $emailPath, $calendarPath, $contactsPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $display = if (@($selectedPaths).Count -eq 1) { $selectedPaths[0] } else { Join-Path $dir ($base + $displayExt) }
+    [pscustomobject]@{
+        DisplayPath = $display
+        TeamsPath = $teamsPath
+        EmailPath = $emailPath
+        CalendarPath = $calendarPath
+        ContactsPath = $contactsPath
     }
-    elseif ($TeamsReport) {
-        $display = Join-Path $dir ($base + '_Teams' + $teamsExt)
-        $teamsPath = $display
-    }
-    else {
-        $display = Join-Path $dir ($base + '_Email' + $emailExt)
-        $emailPath = $display
-    }
-    [pscustomobject]@{ DisplayPath = $display; TeamsPath = $teamsPath; EmailPath = $emailPath }
 }
 
 # ponytail: keep in sync with ReportClassification.ps1
@@ -530,6 +565,18 @@ function Test-IsEmailMessageClass {
     return $MessageClass -match '(?i)^IPM\.Note'
 }
 
+function Test-IsCalendarMessageClass {
+    param([AllowNull()][string]$MessageClass)
+    if ([string]::IsNullOrWhiteSpace($MessageClass)) { return $false }
+    return $MessageClass -match '(?i)^IPM\.(Appointment|Schedule\.Meeting)'
+}
+
+function Test-IsContactsMessageClass {
+    param([AllowNull()][string]$MessageClass)
+    if ([string]::IsNullOrWhiteSpace($MessageClass)) { return $false }
+    return $MessageClass -match '(?i)^IPM\.(Contact|DistList)'
+}
+
 function Get-ItemReportBucket {
     param(
         [Parameter(Mandatory = $true)][string]$FolderPath,
@@ -537,6 +584,8 @@ function Get-ItemReportBucket {
     )
     if (Test-IsTeamsMessagesFolder -FolderPath $FolderPath) { return 'Teams' }
     if (Test-IsEmailMessageClass -MessageClass $MessageClass) { return 'Email' }
+    if (Test-IsCalendarMessageClass -MessageClass $MessageClass) { return 'Calendar' }
+    if (Test-IsContactsMessageClass -MessageClass $MessageClass) { return 'Contacts' }
     return 'Skip'
 }
 
@@ -599,12 +648,227 @@ function Get-MessageRecord {
     }
 }
 
+function Get-RecurrenceSummary {
+    param([AllowNull()][object]$Item)
+
+    if (-not [bool](Get-PropSafe -Object $Item -Name 'IsRecurring' -Default $false)) { return '' }
+
+    $pattern = $null
+    try {
+        if ($null -eq $Item.PSObject.Methods['GetRecurrencePattern']) { return '' }
+        $pattern = $Item.GetRecurrencePattern()
+        if ($null -eq $pattern) { return '' }
+
+        $typeValue = [int](Get-PropSafe -Object $pattern -Name 'RecurrenceType' -Default -1)
+        $typeLabel = switch ($typeValue) {
+            0 { 'Daily' }
+            1 { 'Weekly' }
+            2 { 'Monthly' }
+            3 { 'MonthlyNth' }
+            5 { 'Yearly' }
+            6 { 'YearlyNth' }
+            default { "Type$typeValue" }
+        }
+
+        $parts = New-Object System.Collections.Generic.List[string]
+        [void]$parts.Add($typeLabel)
+
+        $interval = Get-PropSafe -Object $pattern -Name 'Interval' -Default $null
+        if ($null -ne $interval -and [int]$interval -gt 0) {
+            [void]$parts.Add("every $interval")
+        }
+
+        $patternStart = Get-PropSafe -Object $pattern -Name 'PatternStartDate' -Default $null
+        if (-not (Test-MissingDate $patternStart)) {
+            [void]$parts.Add(("starting {0}" -f ([datetime]$patternStart).ToString('yyyy-MM-dd')))
+        }
+
+        if ([bool](Get-PropSafe -Object $pattern -Name 'NoEndDate' -Default $false)) {
+            [void]$parts.Add('no end date')
+        }
+        else {
+            $patternEnd = Get-PropSafe -Object $pattern -Name 'PatternEndDate' -Default $null
+            if (-not (Test-MissingDate $patternEnd)) {
+                [void]$parts.Add(("ending {0}" -f ([datetime]$patternEnd).ToString('yyyy-MM-dd')))
+            }
+        }
+
+        $occurrences = Get-PropSafe -Object $pattern -Name 'Occurrences' -Default $null
+        if ($null -ne $occurrences -and [int]$occurrences -gt 0) {
+            $occurrenceLabel = if ([int]$occurrences -eq 1) { 'occurrence' } else { 'occurrences' }
+            [void]$parts.Add("$occurrences $occurrenceLabel")
+        }
+
+        return ($parts -join '; ')
+    }
+    catch {
+        Write-ReportLog "Could not read recurrence details on calendar item. $($_.Exception.Message)" 'WARN'
+        return ''
+    }
+    finally {
+        Close-ComObjectSafe $pattern
+    }
+}
+
+function Get-CalendarRecord {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Item,
+        [Parameter(Mandatory = $true)] [string]$FolderPath
+    )
+
+    $startTime = Get-PropSafe -Object $Item -Name 'Start' -Default $null
+    if (Test-MissingDate $startTime) { $startTime = $null }
+    $endTime = Get-PropSafe -Object $Item -Name 'End' -Default $null
+    if (Test-MissingDate $endTime) { $endTime = $null }
+    $creationTime = Get-PropSafe -Object $Item -Name 'CreationTime' -Default $null
+    if (Test-MissingDate $creationTime) { $creationTime = $null }
+    $lastModificationTime = Get-PropSafe -Object $Item -Name 'LastModificationTime' -Default $null
+    if (Test-MissingDate $lastModificationTime) { $lastModificationTime = $null }
+    $messageClass = [string](Get-PropSafe -Object $Item -Name 'MessageClass' -Default '')
+    $sortTime = $startTime
+    if (Test-MissingDate $sortTime) { $sortTime = $creationTime }
+    if (Test-MissingDate $sortTime) { $sortTime = $lastModificationTime }
+    if (Test-MissingDate $sortTime) { $sortTime = $null }
+
+    $itemType = if ($messageClass -match '(?i)^IPM\.Schedule\.Meeting') { 'Meeting' } else { 'Appointment' }
+    $bodyText = [string](Get-PropSafe -Object $Item -Name 'Body' -Default '')
+
+    [pscustomobject]@{
+        SortTime             = $sortTime
+        StartTime            = $startTime
+        EndTime              = $endTime
+        Subject              = [string](Get-PropSafe -Object $Item -Name 'Subject' -Default '')
+        ItemType             = $itemType
+        AllDayEvent          = [bool](Get-PropSafe -Object $Item -Name 'AllDayEvent' -Default $false)
+        Location             = [string](Get-PropSafe -Object $Item -Name 'Location' -Default '')
+        Organizer            = [string](Get-PropSafe -Object $Item -Name 'Organizer' -Default '')
+        RequiredAttendees    = [string](Get-PropSafe -Object $Item -Name 'RequiredAttendees' -Default '')
+        OptionalAttendees    = [string](Get-PropSafe -Object $Item -Name 'OptionalAttendees' -Default '')
+        IsRecurring          = [bool](Get-PropSafe -Object $Item -Name 'IsRecurring' -Default $false)
+        RecurrenceSummary    = Get-RecurrenceSummary -Item $Item
+        Categories           = [string](Get-PropSafe -Object $Item -Name 'Categories' -Default '')
+        Sensitivity          = Get-PropSafe -Object $Item -Name 'Sensitivity' -Default $null
+        FolderPath           = $FolderPath
+        BodyText             = $bodyText
+        Notes                = $bodyText
+        MessageClass         = $messageClass
+        EntryId              = [string](Get-PropSafe -Object $Item -Name 'EntryID' -Default '')
+        CreationTime         = $creationTime
+        LastModificationTime = $lastModificationTime
+        Attachments          = @(Get-AttachmentMetadata -Item $Item)
+    }
+}
+
+function Get-DistributionListMembers {
+    param([AllowNull()][object]$Item)
+
+    $members = New-Object System.Collections.Generic.List[string]
+    $memberCount = [int](Get-PropSafe -Object $Item -Name 'MemberCount' -Default 0)
+    if ($memberCount -le 0) { return @() }
+    if ($null -eq $Item.PSObject.Methods['GetMember']) { return @() }
+
+    for ($i = 1; $i -le $memberCount; $i++) {
+        $member = $null
+        try {
+            $member = $Item.GetMember($i)
+            $memberName = [string](Get-PropSafe -Object $member -Name 'Name' -Default '')
+            if ([string]::IsNullOrWhiteSpace($memberName)) {
+                $memberName = [string](Get-PropSafe -Object $member -Name 'Address' -Default '')
+            }
+            if (-not [string]::IsNullOrWhiteSpace($memberName)) {
+                [void]$members.Add($memberName)
+            }
+        }
+        catch {
+            Write-ReportLog "Could not read distribution list member $i on contact item. $($_.Exception.Message)" 'WARN'
+        }
+        finally {
+            Close-ComObjectSafe $member
+        }
+    }
+
+    return $members.ToArray()
+}
+
+function Get-ContactRecord {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Item,
+        [Parameter(Mandatory = $true)] [string]$FolderPath
+    )
+
+    $firstName = [string](Get-PropSafe -Object $Item -Name 'FirstName' -Default '')
+    $middleName = [string](Get-PropSafe -Object $Item -Name 'MiddleName' -Default '')
+    $lastName = [string](Get-PropSafe -Object $Item -Name 'LastName' -Default '')
+    $messageClass = [string](Get-PropSafe -Object $Item -Name 'MessageClass' -Default '')
+    $isDistributionList = $messageClass -match '(?i)^IPM\.DistList'
+    $dlName = [string](Get-PropSafe -Object $Item -Name 'DLName' -Default '')
+    $fullName = [string](Get-PropSafe -Object $Item -Name 'FullName' -Default '')
+    if ($isDistributionList -and [string]::IsNullOrWhiteSpace($fullName)) {
+        $fullName = $dlName
+    }
+    if ([string]::IsNullOrWhiteSpace($fullName)) {
+        $fullName = (@($firstName, $middleName, $lastName) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+    }
+    $displayName = [string](Get-PropSafe -Object $Item -Name 'FileAs' -Default '')
+    if ($isDistributionList -and [string]::IsNullOrWhiteSpace($displayName)) { $displayName = $dlName }
+    if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $fullName }
+    if ([string]::IsNullOrWhiteSpace($displayName)) {
+        $displayName = [string](Get-PropSafe -Object $Item -Name 'CompanyName' -Default '')
+    }
+
+    $birthday = Get-PropSafe -Object $Item -Name 'Birthday' -Default $null
+    if (Test-MissingDate $birthday) { $birthday = $null }
+    $anniversary = Get-PropSafe -Object $Item -Name 'Anniversary' -Default $null
+    if (Test-MissingDate $anniversary) { $anniversary = $null }
+    $creationTime = Get-PropSafe -Object $Item -Name 'CreationTime' -Default $null
+    if (Test-MissingDate $creationTime) { $creationTime = $null }
+    $lastModificationTime = Get-PropSafe -Object $Item -Name 'LastModificationTime' -Default $null
+    if (Test-MissingDate $lastModificationTime) { $lastModificationTime = $null }
+    $bodyText = [string](Get-PropSafe -Object $Item -Name 'Body' -Default '')
+
+    [pscustomobject]@{
+        DisplayName             = $displayName
+        FullName                = $fullName
+        FirstName               = $firstName
+        MiddleName              = $middleName
+        LastName                = $lastName
+        CompanyName             = [string](Get-PropSafe -Object $Item -Name 'CompanyName' -Default '')
+        JobTitle                = [string](Get-PropSafe -Object $Item -Name 'JobTitle' -Default '')
+        Department              = [string](Get-PropSafe -Object $Item -Name 'Department' -Default '')
+        Email1                  = [string](Get-PropSafe -Object $Item -Name 'Email1Address' -Default '')
+        Email2                  = [string](Get-PropSafe -Object $Item -Name 'Email2Address' -Default '')
+        Email3                  = [string](Get-PropSafe -Object $Item -Name 'Email3Address' -Default '')
+        BusinessPhone           = [string](Get-PropSafe -Object $Item -Name 'BusinessTelephoneNumber' -Default '')
+        HomePhone               = [string](Get-PropSafe -Object $Item -Name 'HomeTelephoneNumber' -Default '')
+        MobilePhone             = [string](Get-PropSafe -Object $Item -Name 'MobileTelephoneNumber' -Default '')
+        OtherPhone              = [string](Get-PropSafe -Object $Item -Name 'OtherTelephoneNumber' -Default '')
+        BusinessAddress         = [string](Get-PropSafe -Object $Item -Name 'BusinessAddress' -Default '')
+        HomeAddress             = [string](Get-PropSafe -Object $Item -Name 'HomeAddress' -Default '')
+        OtherAddress            = [string](Get-PropSafe -Object $Item -Name 'OtherAddress' -Default '')
+        WebPage                 = [string](Get-PropSafe -Object $Item -Name 'WebPage' -Default '')
+        Birthday                = $birthday
+        Anniversary             = $anniversary
+        Categories              = [string](Get-PropSafe -Object $Item -Name 'Categories' -Default '')
+        DistributionListMembers = @(Get-DistributionListMembers -Item $Item)
+        FolderPath              = $FolderPath
+        BodyText                = $bodyText
+        Notes                   = $bodyText
+        MessageClass            = $messageClass
+        EntryId                 = [string](Get-PropSafe -Object $Item -Name 'EntryID' -Default '')
+        CreationTime            = $creationTime
+        LastModificationTime    = $lastModificationTime
+        Attachments             = @(Get-AttachmentMetadata -Item $Item)
+    }
+}
+
 function Read-OutlookFolder {
     param(
         [Parameter(Mandatory = $true)] [object]$Folder,
         [Parameter(Mandatory = $true)] [string]$FolderPath,
         [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$TeamsRecords,
-        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$EmailRecords
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$EmailRecords,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$CalendarRecords,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$ContactsRecords
     )
 
     $script:Stats.FoldersScanned++
@@ -627,12 +891,12 @@ function Read-OutlookFolder {
                 $messageClass = Get-PropSafe -Object $item -Name 'MessageClass' -Default ''
                 $body = Get-PropSafe -Object $item -Name 'Body' -Default $null
                 $subject = Get-PropSafe -Object $item -Name 'Subject' -Default $null
-                $isMessageLike = ($messageClass -or $body -or $subject)
+                $bucket = Get-ItemReportBucket -FolderPath $FolderPath -MessageClass $messageClass
+                $isMessageLike = ($messageClass -or $body -or $subject -or $bucket -in @('Calendar', 'Contacts'))
 
                 # Purview Teams messages are usually mail-like items in an Exchange PST. Export any
                 # item that has normal message properties instead of requiring one exact MessageClass.
                 if ($isMessageLike) {
-                    $bucket = Get-ItemReportBucket -FolderPath $FolderPath -MessageClass $messageClass
                     if ($bucket -eq 'Teams' -and $TeamsReport) {
                         [void]$TeamsRecords.Add((Get-MessageRecord -Item $item -FolderPath $FolderPath))
                         $script:Stats.TeamsItemsExported++
@@ -641,6 +905,16 @@ function Read-OutlookFolder {
                     elseif ($bucket -eq 'Email' -and $EmailReport) {
                         [void]$EmailRecords.Add((Get-MessageRecord -Item $item -FolderPath $FolderPath))
                         $script:Stats.EmailItemsExported++
+                        $script:Stats.ItemsExported++
+                    }
+                    elseif ($bucket -eq 'Calendar' -and $CalendarReport) {
+                        [void]$CalendarRecords.Add((Get-CalendarRecord -Item $item -FolderPath $FolderPath))
+                        $script:Stats.CalendarItemsExported++
+                        $script:Stats.ItemsExported++
+                    }
+                    elseif ($bucket -eq 'Contacts' -and $ContactsReport) {
+                        [void]$ContactsRecords.Add((Get-ContactRecord -Item $item -FolderPath $FolderPath))
+                        $script:Stats.ContactsItemsExported++
                         $script:Stats.ItemsExported++
                     }
                     else {
@@ -682,7 +956,7 @@ function Read-OutlookFolder {
             try {
                 $child = $subFolders.Item($j)
                 $childName = Get-PropSafe -Object $child -Name 'Name' -Default "Folder$j"
-                Read-OutlookFolder -Folder $child -FolderPath "$FolderPath\$childName" -TeamsRecords $TeamsRecords -EmailRecords $EmailRecords
+                Read-OutlookFolder -Folder $child -FolderPath "$FolderPath\$childName" -TeamsRecords $TeamsRecords -EmailRecords $EmailRecords -CalendarRecords $CalendarRecords -ContactsRecords $ContactsRecords
             }
             catch {
                 $script:Stats.SubfolderScanFailures++
@@ -1835,6 +2109,12 @@ function Get-SampleRecord {
             [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:00:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Budget'; MessageClass = 'IPM.Note'; SenderName = 'Linda Artley'; SenderEmail = 'linda@example.com'; SenderDisplay = 'Linda Artley'; To = 'Torey Page'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "id:sample-conversation-1"; ConversationTitle = 'Budget'; ConversationTopic = 'Budget planning'; ConversationId = 'sample-conversation-1'; SentOn = [datetime]'2024-01-01T10:00:00'; ReceivedTime = [datetime]'2024-01-01T10:00:05'; CreationTime = [datetime]'2024-01-01T10:00:05'; EntryId = 'sample-entry-3'; BodyText = 'Budget phoenix attached.'; AttachmentsHtml = '' }
             [pscustomobject]@{ SortTime = [datetime]'2024-01-01T10:05:00'; FolderPath = 'SamplePst\Inbox'; Subject = 'Re: Budget'; MessageClass = 'IPM.Note'; SenderName = 'Torey Page'; SenderEmail = 'torey@example.com'; SenderDisplay = 'Torey Page'; To = 'Linda Artley'; Cc = ''; Participants = @('Linda Artley','Torey Page'); ParticipantsKey = 'Linda Artley || Torey Page'; ConversationKey = "id:sample-conversation-1"; ConversationTitle = 'Budget'; ConversationTopic = 'Budget planning'; ConversationId = 'sample-conversation-1'; SentOn = [datetime]'2024-01-01T10:05:00'; ReceivedTime = [datetime]'2024-01-01T10:05:05'; CreationTime = [datetime]'2024-01-01T10:05:05'; EntryId = 'sample-entry-4'; BodyText = 'Thanks, I will review it.'; AttachmentsHtml = '' }
         )
+        Calendar = @(
+            [pscustomobject]@{ SortTime = [datetime]'2024-01-08T09:00:00'; StartTime = [datetime]'2024-01-08T09:00:00'; EndTime = [datetime]'2024-01-08T10:00:00'; Subject = 'Weekly planning'; ItemType = 'Appointment'; AllDayEvent = $false; Location = 'Conference Room'; Organizer = 'Torey Page'; RequiredAttendees = 'Linda Artley; Sam Reed'; OptionalAttendees = 'Ava Stone'; IsRecurring = $true; RecurrenceSummary = 'Weekly; every 1; starting 2024-01-08; no end date'; Categories = 'Blue Category'; Sensitivity = 2; FolderPath = 'SamplePst\Calendar'; BodyText = 'Recurring planning agenda.'; Notes = 'Recurring planning agenda.'; MessageClass = 'IPM.Appointment'; EntryId = 'sample-calendar-1'; CreationTime = [datetime]'2024-01-02T08:15:00'; LastModificationTime = [datetime]'2024-01-03T11:20:00'; Attachments = @() }
+        )
+        Contacts = @(
+            [pscustomobject]@{ DisplayName = 'Curriculum Team'; FullName = 'Curriculum Team'; FirstName = ''; MiddleName = ''; LastName = ''; CompanyName = 'Perfection Learning'; JobTitle = 'Distribution List'; Department = 'Curriculum'; Email1 = 'curriculum@example.com'; Email2 = ''; Email3 = ''; BusinessPhone = '555-1000'; HomePhone = ''; MobilePhone = ''; OtherPhone = ''; BusinessAddress = '100 Main St'; HomeAddress = ''; OtherAddress = ''; WebPage = 'https://example.com'; Birthday = $null; Anniversary = $null; Categories = 'Blue Category'; DistributionListMembers = @('Linda Artley', 'Sam Reed'); FolderPath = 'SamplePst\Contacts'; BodyText = 'Shared curriculum contacts.'; Notes = 'Shared curriculum contacts.'; MessageClass = 'IPM.DistList'; EntryId = 'sample-contact-1'; CreationTime = [datetime]'2024-01-03T09:45:00'; LastModificationTime = [datetime]'2024-01-04T10:15:00'; Attachments = @() }
+        )
     }
 }
 
@@ -1985,6 +2265,796 @@ function Write-EmailHtmlReport {
     }
 }
 
+function ConvertTo-NormalizedFilterText {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return '' }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+    return (($text -replace '\s+', ' ').Trim().ToLowerInvariant())
+}
+
+function Split-RecordCategories {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return @() }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
+
+    $items = @($text -split '\s*[;,]\s*' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($items.Count -gt 0) { return $items }
+    return @($text.Trim())
+}
+
+function ConvertTo-JsonArrayAttributeValue {
+    param([AllowNull()][string[]]$Values)
+
+    $safeValues = @($Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($safeValues.Count -eq 0) { return '[]' }
+
+    $jsonItems = @($safeValues | ForEach-Object { ConvertTo-Json -InputObject ([string]$_) -Compress })
+    return (ConvertTo-HtmlEncodedText ('[' + ($jsonItems -join ',') + ']'))
+}
+
+function Get-RecordValueHtml {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return "<span class='empty'>(none)</span>" }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return "<span class='empty'>(none)</span>" }
+    return (ConvertTo-HtmlEncodedText $text)
+}
+
+function Format-RecordDateTime {
+    param([AllowNull()][object]$Value)
+
+    if (Test-MissingDate $Value) { return '' }
+    try { return ([datetime]$Value).ToString('MMM d, yyyy h:mm tt') } catch { return [string]$Value }
+}
+
+function Format-RecordDate {
+    param([AllowNull()][object]$Value)
+
+    if (Test-MissingDate $Value) { return '' }
+    try { return ([datetime]$Value).ToString('MMM d, yyyy') } catch { return [string]$Value }
+}
+
+function Get-EffectiveFilterEndDate {
+    param(
+        [AllowNull()][object]$StartTime,
+        [AllowNull()][object]$EndTime
+    )
+
+    if (Test-MissingDate $EndTime) {
+        if (Test-MissingDate $StartTime) { return '' }
+        return ([datetime]$StartTime).ToString('yyyy-MM-dd')
+    }
+
+    $effectiveEnd = [datetime]$EndTime
+    if (-not (Test-MissingDate $StartTime)) {
+        $startValue = [datetime]$StartTime
+        if ($effectiveEnd -gt $startValue -and $effectiveEnd.TimeOfDay -eq [TimeSpan]::Zero) {
+            $effectiveEnd = $effectiveEnd.AddDays(-1)
+        }
+    }
+
+    return $effectiveEnd.ToString('yyyy-MM-dd')
+}
+
+function Get-CalendarSensitivityLabel {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return '' }
+    $intValue = $null
+    try { $intValue = [int]$Value } catch { }
+    switch ($intValue) {
+        1 { return 'Personal (1)' }
+        2 { return 'Private (2)' }
+        3 { return 'Confidential (3)' }
+        0 { return 'Normal (0)' }
+        default {
+            return [string]$Value
+        }
+    }
+}
+
+function New-DetailFieldHtml {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [AllowNull()][object]$Value
+    )
+
+    return "<div class='detail-field'><div class='detail-label'>$(ConvertTo-HtmlEncodedText $Label)</div><div class='detail-value'>$(Get-RecordValueHtml $Value)</div></div>"
+}
+
+function New-RecordListHtml {
+    param([AllowNull()][string[]]$Values)
+
+    $items = @($Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($items.Count -eq 0) { return "<span class='empty'>(none)</span>" }
+
+    $rows = @($items | ForEach-Object { "<li>$(ConvertTo-HtmlEncodedText $_)</li>" })
+    return "<ul class='detail-list'>$($rows -join '')</ul>"
+}
+
+function Get-StaticAttachmentMetadataHtml {
+    param([AllowNull()][object[]]$Attachments)
+
+    $attachmentRows = @($Attachments)
+    if ($attachmentRows.Count -eq 0) {
+        return @"
+<section class='record-section'>
+  <h3>Attachment metadata</h3>
+  <div class='detail-value'><span class='empty'>(none)</span></div>
+</section>
+"@
+    }
+
+    $rows = New-Object System.Collections.Generic.List[string]
+    foreach ($attachment in $attachmentRows) {
+        $rowText = '<tr><td>{0}</td><td>{1}</td><td>{2}</td></tr>' -f
+            (ConvertTo-HtmlEncodedText (Get-PropSafe -Object $attachment -Name 'FileName' -Default '')),
+            (ConvertTo-HtmlEncodedText (Get-PropSafe -Object $attachment -Name 'DisplayName' -Default '')),
+            (ConvertTo-HtmlEncodedText (Get-PropSafe -Object $attachment -Name 'Size' -Default ''))
+        [void]$rows.Add($rowText)
+    }
+
+    return @"
+<section class='record-section'>
+  <h3>Attachment metadata</h3>
+  <table class='meta-table'>
+    <thead><tr><th>File name</th><th>Display name</th><th>Size bytes</th></tr></thead>
+    <tbody>
+$($rows -join "`n")
+    </tbody>
+  </table>
+</section>
+"@
+}
+
+function Get-StaticRecordReportCss {
+    $baseCss = Get-ReportCss
+    return $baseCss + @'
+@media (min-width: 901px) { .review-layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); } }
+.filter-stack { display: grid; gap: 12px; }
+.filter-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.filter-grid label { display: grid; gap: 5px; font-weight: 700; color: #334155; font-size: .92rem; }
+.filter-grid input[type="search"], .filter-grid input[type="date"], .filter-grid select { width: 100%; padding: 10px 11px; border: 1px solid #b9c4d3; border-radius: 10px; font-size: .95rem; background: white; }
+.filter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.record-list { display: grid; gap: 14px; }
+.record-card { padding: 16px 18px; content-visibility: auto; contain-intrinsic-size: auto 520px; }
+.record-card[hidden] { display: none; }
+.record-header { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; margin-bottom: 12px; }
+.record-header h2 { margin: 0 0 4px; font-size: 1.08rem; }
+.record-subtitle { color: var(--muted); font-size: .92rem; }
+.badge-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 10px; background: #eef3ff; color: #24408d; font-size: .84rem; font-weight: 800; border: 1px solid #c7d4ef; }
+.details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.detail-field { border: 1px solid #e5eaf2; border-radius: 12px; background: #fbfcff; padding: 10px 12px; }
+.detail-label { color: var(--muted); font-size: .8rem; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; margin-bottom: 4px; }
+.detail-value { overflow-wrap: anywhere; }
+.detail-list { margin: 0; padding-left: 18px; }
+.record-section { margin-top: 14px; }
+.record-section h3 { margin: 0 0 8px; font-size: .95rem; color: #243047; }
+.body-block { background: white; border: 1px solid #e5eaf2; border-radius: 12px; padding: 12px; overflow-wrap: anywhere; }
+.meta-table { margin-top: 0; }
+.empty { color: var(--muted); font-style: italic; }
+@media (max-width: 900px) { .record-header { display: block; } .badge-row { justify-content: flex-start; margin-top: 10px; } }
+'@
+}
+
+function Get-CalendarReportScript {
+    return @'
+(function () {
+  const searchInput = document.getElementById('calendarSearch');
+  const fromDateInput = document.getElementById('calendarFromDateFilter');
+  const toDateInput = document.getElementById('calendarToDateFilter');
+  const folderSelect = document.getElementById('calendarFolderFilter');
+  const typeSelect = document.getElementById('calendarTypeFilter');
+  const allDaySelect = document.getElementById('calendarAllDayFilter');
+  const recurringSelect = document.getElementById('calendarRecurringFilter');
+  const clearBtn = document.getElementById('calendarClearFiltersBtn');
+  const visibleCount = document.getElementById('calendarVisibleCount');
+  const cards = Array.from(document.querySelectorAll('.record-card'));
+  const totalCount = cards.length;
+  let scheduled = false;
+
+  cards.forEach(card => {
+    card._search = (card.dataset.search || '').toLowerCase();
+    card._startDate = card.dataset.startDate || '';
+    card._endDate = card.dataset.endDate || '';
+    card._folder = (card.dataset.folder || '').toLowerCase();
+    card._itemType = (card.dataset.itemType || '').toLowerCase();
+    card._allDay = (card.dataset.allDay || '').toLowerCase();
+    card._recurring = (card.dataset.recurring || '').toLowerCase();
+  });
+
+  function updateVisibleCount(shown) {
+    if (!visibleCount) return;
+    visibleCount.textContent = shown + ' of ' + totalCount + ' records shown';
+  }
+
+  function matchesDateRange(card, fromDate, toDate) {
+    if (fromDate && card._endDate && card._endDate < fromDate) return false;
+    if (toDate && card._startDate && card._startDate > toDate) return false;
+    return true;
+  }
+
+  function applyFilters() {
+    const query = searchInput ? (searchInput.value || '').trim().toLowerCase() : '';
+    const fromDate = fromDateInput ? (fromDateInput.value || '') : '';
+    const toDate = toDateInput ? (toDateInput.value || '') : '';
+    const folder = folderSelect ? (folderSelect.value || '').toLowerCase() : '';
+    const itemType = typeSelect ? (typeSelect.value || '').toLowerCase() : '';
+    const allDay = allDaySelect ? (allDaySelect.value || '') : '';
+    const recurring = recurringSelect ? (recurringSelect.value || '') : '';
+    let shown = 0;
+
+    cards.forEach(card => {
+      const show = (!query || card._search.indexOf(query) !== -1)
+        && (!folder || card._folder === folder)
+        && (!itemType || card._itemType === itemType)
+        && (!allDay || card._allDay === allDay)
+        && (!recurring || card._recurring === recurring)
+        && matchesDateRange(card, fromDate, toDate);
+      card.hidden = !show;
+      if (show) shown += 1;
+    });
+
+    updateVisibleCount(shown);
+  }
+
+  function scheduleApply() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      applyFilters();
+    });
+  }
+
+  function resetFilters() {
+    if (searchInput) searchInput.value = '';
+    if (fromDateInput) fromDateInput.value = '';
+    if (toDateInput) toDateInput.value = '';
+    if (folderSelect) folderSelect.value = '';
+    if (typeSelect) typeSelect.value = '';
+    if (allDaySelect) allDaySelect.value = '';
+    if (recurringSelect) recurringSelect.value = '';
+    applyFilters();
+  }
+
+  if (searchInput) searchInput.addEventListener('input', scheduleApply);
+  if (fromDateInput) fromDateInput.addEventListener('change', applyFilters);
+  if (toDateInput) toDateInput.addEventListener('change', applyFilters);
+  if (folderSelect) folderSelect.addEventListener('change', applyFilters);
+  if (typeSelect) typeSelect.addEventListener('change', applyFilters);
+  if (allDaySelect) allDaySelect.addEventListener('change', applyFilters);
+  if (recurringSelect) recurringSelect.addEventListener('change', applyFilters);
+  if (clearBtn) clearBtn.addEventListener('click', resetFilters);
+
+  requestAnimationFrame(applyFilters);
+})();
+'@
+}
+
+function Get-ContactsReportScript {
+    return @'
+(function () {
+  const searchInput = document.getElementById('contactsSearch');
+  const folderSelect = document.getElementById('contactsFolderFilter');
+  const categorySelect = document.getElementById('contactsCategoryFilter');
+  const clearBtn = document.getElementById('contactsClearFiltersBtn');
+  const visibleCount = document.getElementById('contactsVisibleCount');
+  const cards = Array.from(document.querySelectorAll('.record-card'));
+  const totalCount = cards.length;
+  let scheduled = false;
+
+  function parseList(value) {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  cards.forEach(card => {
+    card._search = (card.dataset.search || '').toLowerCase();
+    card._folder = (card.dataset.folder || '').toLowerCase();
+    card._categories = parseList(card.dataset.categories).map(v => String(v).toLowerCase());
+  });
+
+  function updateVisibleCount(shown) {
+    if (!visibleCount) return;
+    visibleCount.textContent = shown + ' of ' + totalCount + ' records shown';
+  }
+
+  function applyFilters() {
+    const query = searchInput ? (searchInput.value || '').trim().toLowerCase() : '';
+    const folder = folderSelect ? (folderSelect.value || '').toLowerCase() : '';
+    const category = categorySelect ? (categorySelect.value || '').toLowerCase() : '';
+    let shown = 0;
+
+    cards.forEach(card => {
+      const show = (!query || card._search.indexOf(query) !== -1)
+        && (!folder || card._folder === folder)
+        && (!category || card._categories.indexOf(category) !== -1);
+      card.hidden = !show;
+      if (show) shown += 1;
+    });
+
+    updateVisibleCount(shown);
+  }
+
+  function scheduleApply() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      applyFilters();
+    });
+  }
+
+  function resetFilters() {
+    if (searchInput) searchInput.value = '';
+    if (folderSelect) folderSelect.value = '';
+    if (categorySelect) categorySelect.value = '';
+    applyFilters();
+  }
+
+  if (searchInput) searchInput.addEventListener('input', scheduleApply);
+  if (folderSelect) folderSelect.addEventListener('change', applyFilters);
+  if (categorySelect) categorySelect.addEventListener('change', applyFilters);
+  if (clearBtn) clearBtn.addEventListener('click', resetFilters);
+
+  requestAnimationFrame(applyFilters);
+})();
+'@
+}
+
+function Write-CalendarReportHeader {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)]$PstItem,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SortedRecords,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderOptions,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$TypeOptions,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+
+    $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
+    $css = Get-StaticRecordReportCss
+    $Writer.WriteLine(@"
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Purview Calendar PST Report - $(ConvertTo-HtmlEncodedText $PstItem.Name)</title>
+<style>
+$css
+</style>
+</head>
+<body>
+<div class='page'>
+  <header class='hero'>
+    <h1>Microsoft Purview eDiscovery Calendar Report</h1>
+    <p>Static offline review of calendar appointments and meeting items with client-side search and filters.</p>
+    <div class='hero-credit'>By Patrick Bush</div>
+  </header>
+
+  <section class='summary-grid' aria-label='Calendar report summary'>
+    <div class='summary-card'><div class='label'>PST</div><div class='value'>$(ConvertTo-HtmlEncodedText $PstItem.Name)</div></div>
+    <div class='summary-card'><div class='label'>Generated</div><div class='value'>$(ConvertTo-HtmlEncodedText $generated)</div></div>
+    <div class='summary-card'><div class='label'>Calendar records</div><div class='value'>$(ConvertTo-HtmlEncodedText $SortedRecords.Count)</div></div>
+    <div class='summary-card'><div class='label'>Folders detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $FolderOptions.Count)</div></div>
+    <div class='summary-card'><div class='label'>Item types</div><div class='value'>$(ConvertTo-HtmlEncodedText $TypeOptions.Count)</div></div>
+    <div class='summary-card'><div class='label'>Recurring items</div><div class='value'>$(ConvertTo-HtmlEncodedText (@($SortedRecords | Where-Object { $_.IsRecurring }).Count))</div></div>
+  </section>
+
+  <div class='review-layout'>
+    <aside class='filter-panel' aria-label='Calendar filters'>
+      <div class='filter-title'>
+        <h2>Filter calendar records</h2>
+        <span id='calendarVisibleCount' class='result-count'></span>
+      </div>
+      <p class='filter-help'>Search is precomputed from normalized calendar fields. Date filtering is applied entirely in the browser using per-record start and end dates.</p>
+      <div class='filter-stack'>
+        <div class='filter-grid'>
+          <label for='calendarSearch'>Search
+            <input id='calendarSearch' type='search' placeholder='Subject, people, notes, folder, ID' autocomplete='off'/>
+          </label>
+          <label for='calendarFromDateFilter'>From date
+            <input id='calendarFromDateFilter' type='date'/>
+          </label>
+          <label for='calendarToDateFilter'>To date
+            <input id='calendarToDateFilter' type='date'/>
+          </label>
+          <label for='calendarFolderFilter'>Folder
+            <select id='calendarFolderFilter'>
+              <option value=''>All folders</option>
+$($FolderOptions -join "`n")
+            </select>
+          </label>
+          <label for='calendarTypeFilter'>Type
+            <select id='calendarTypeFilter'>
+              <option value=''>All types</option>
+$($TypeOptions -join "`n")
+            </select>
+          </label>
+          <label for='calendarAllDayFilter'>All-day
+            <select id='calendarAllDayFilter'>
+              <option value=''>Any</option>
+              <option value='yes'>Yes</option>
+              <option value='no'>No</option>
+            </select>
+          </label>
+          <label for='calendarRecurringFilter'>Recurring
+            <select id='calendarRecurringFilter'>
+              <option value=''>Any</option>
+              <option value='yes'>Yes</option>
+              <option value='no'>No</option>
+            </select>
+          </label>
+        </div>
+        <div class='filter-actions'>
+          <button type='button' class='secondary' id='calendarClearFiltersBtn'>Clear filters</button>
+        </div>
+      </div>
+      <div class='footer'>Log file: $(ConvertTo-HtmlEncodedText $LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
+    </aside>
+
+    <main class='conversation-pane' aria-label='Calendar records'>
+      <section id='calendarRecordList' class='record-list'>
+"@)
+}
+
+function Write-ContactsReportHeader {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)]$PstItem,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SortedRecords,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderOptions,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$CategoryOptions,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+
+    $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
+    $css = Get-StaticRecordReportCss
+    $Writer.WriteLine(@"
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Purview Contacts PST Report - $(ConvertTo-HtmlEncodedText $PstItem.Name)</title>
+<style>
+$css
+</style>
+</head>
+<body>
+<div class='page'>
+  <header class='hero'>
+    <h1>Microsoft Purview eDiscovery Contacts Report</h1>
+    <p>Static offline review of contacts and distribution lists with client-side search, folder filtering, and category filtering.</p>
+    <div class='hero-credit'>By Patrick Bush</div>
+  </header>
+
+  <section class='summary-grid' aria-label='Contacts report summary'>
+    <div class='summary-card'><div class='label'>PST</div><div class='value'>$(ConvertTo-HtmlEncodedText $PstItem.Name)</div></div>
+    <div class='summary-card'><div class='label'>Generated</div><div class='value'>$(ConvertTo-HtmlEncodedText $generated)</div></div>
+    <div class='summary-card'><div class='label'>Contact records</div><div class='value'>$(ConvertTo-HtmlEncodedText $SortedRecords.Count)</div></div>
+    <div class='summary-card'><div class='label'>Folders detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $FolderOptions.Count)</div></div>
+    <div class='summary-card'><div class='label'>Categories detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $CategoryOptions.Count)</div></div>
+    <div class='summary-card'><div class='label'>Distribution lists</div><div class='value'>$(ConvertTo-HtmlEncodedText (@($SortedRecords | Where-Object { @($_.DistributionListMembers).Count -gt 0 }).Count))</div></div>
+  </section>
+
+  <div class='review-layout'>
+    <aside class='filter-panel' aria-label='Contacts filters'>
+      <div class='filter-title'>
+        <h2>Filter contacts</h2>
+        <span id='contactsVisibleCount' class='result-count'></span>
+      </div>
+      <p class='filter-help'>Search is precomputed from normalized contact names, organizations, addresses, notes, and identifiers so filtering stays fast even on large exports.</p>
+      <div class='filter-stack'>
+        <div class='filter-grid'>
+          <label for='contactsSearch'>Search
+            <input id='contactsSearch' type='search' placeholder='Names, organization, email, notes, ID' autocomplete='off'/>
+          </label>
+          <label for='contactsFolderFilter'>Folder
+            <select id='contactsFolderFilter'>
+              <option value=''>All folders</option>
+$($FolderOptions -join "`n")
+            </select>
+          </label>
+          <label for='contactsCategoryFilter'>Category
+            <select id='contactsCategoryFilter'>
+              <option value=''>All categories</option>
+$($CategoryOptions -join "`n")
+            </select>
+          </label>
+        </div>
+        <div class='filter-actions'>
+          <button type='button' class='secondary' id='contactsClearFiltersBtn'>Clear filters</button>
+        </div>
+      </div>
+      <div class='footer'>Log file: $(ConvertTo-HtmlEncodedText $LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
+    </aside>
+
+    <main class='conversation-pane' aria-label='Contact records'>
+      <section id='contactsRecordList' class='record-list'>
+"@)
+}
+
+function Write-StaticRecordReportFooter {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)][string]$ScriptText
+    )
+
+    $Writer.WriteLine(@"
+      </section>
+    </main>
+  </div>
+</div>
+<script>
+$ScriptText
+</script>
+</body>
+</html>
+"@)
+}
+
+function Write-CalendarRecordHtml {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)]$Record
+    )
+
+    $subject = if ([string]::IsNullOrWhiteSpace([string]$Record.Subject)) { '(no subject)' } else { [string]$Record.Subject }
+    $startDisplay = Format-RecordDateTime $Record.StartTime
+    $endDisplay = Format-RecordDateTime $Record.EndTime
+    $startDate = if (Test-MissingDate $Record.StartTime) { '' } else { ([datetime]$Record.StartTime).ToString('yyyy-MM-dd') }
+    $endDate = Get-EffectiveFilterEndDate -StartTime $Record.StartTime -EndTime $Record.EndTime
+    $typeText = if ([string]::IsNullOrWhiteSpace([string]$Record.ItemType)) { 'Unknown' } else { [string]$Record.ItemType }
+    $allDay = if ($Record.AllDayEvent) { 'yes' } else { 'no' }
+    $recurring = if ($Record.IsRecurring) { 'yes' } else { 'no' }
+    $sensitivityText = Get-CalendarSensitivityLabel $Record.Sensitivity
+    $folderText = [string](Get-PropSafe -Object $Record -Name 'FolderPath' -Default '')
+    $searchParts = @(
+        $subject, $typeText, $startDisplay, $endDisplay, $Record.Location, $Record.Organizer,
+        $Record.RequiredAttendees, $Record.OptionalAttendees, $Record.RecurrenceSummary,
+        $Record.Categories, $sensitivityText, $folderText, $Record.Notes, $Record.BodyText,
+        $Record.MessageClass, $Record.EntryId
+    )
+    foreach ($attachment in @($Record.Attachments)) {
+        $searchParts += @(
+            (Get-PropSafe -Object $attachment -Name 'FileName' -Default ''),
+            (Get-PropSafe -Object $attachment -Name 'DisplayName' -Default ''),
+            (Get-PropSafe -Object $attachment -Name 'Size' -Default '')
+        )
+    }
+    $searchText = ConvertTo-NormalizedFilterText ($searchParts -join ' ')
+    $subtitleParts = @($startDisplay, $endDisplay, $folderText | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $subtitle = if ($subtitleParts.Count -gt 0) { $subtitleParts -join ' | ' } else { '' }
+    $Writer.WriteLine(@"
+<article class='conversation record-card' data-search='$(ConvertTo-HtmlEncodedText $searchText)' data-start-date='$(ConvertTo-HtmlEncodedText $startDate)' data-end-date='$(ConvertTo-HtmlEncodedText $endDate)' data-folder='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $folderText))' data-item-type='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $typeText))' data-all-day='$(ConvertTo-HtmlEncodedText $allDay)' data-recurring='$(ConvertTo-HtmlEncodedText $recurring)'>
+  <header class='record-header'>
+    <div>
+      <h2>$(ConvertTo-HtmlEncodedText $subject)</h2>
+      <div class='record-subtitle'>$(Get-RecordValueHtml $subtitle)</div>
+    </div>
+    <div class='badge-row'>
+      <span class='pill'>$(ConvertTo-HtmlEncodedText $typeText)</span>
+      <span class='pill'>All-day: $(ConvertTo-HtmlEncodedText $allDay)</span>
+      <span class='pill'>Recurring: $(ConvertTo-HtmlEncodedText $recurring)</span>
+    </div>
+  </header>
+  <section class='details-grid'>
+    $(New-DetailFieldHtml -Label 'Subject' -Value $subject)
+    $(New-DetailFieldHtml -Label 'Item type' -Value $typeText)
+    $(New-DetailFieldHtml -Label 'Start' -Value $startDisplay)
+    $(New-DetailFieldHtml -Label 'End' -Value $endDisplay)
+    $(New-DetailFieldHtml -Label 'All-day' -Value $allDay)
+    $(New-DetailFieldHtml -Label 'Location' -Value $Record.Location)
+    $(New-DetailFieldHtml -Label 'Organizer' -Value $Record.Organizer)
+    $(New-DetailFieldHtml -Label 'Required attendees' -Value $Record.RequiredAttendees)
+    $(New-DetailFieldHtml -Label 'Optional attendees' -Value $Record.OptionalAttendees)
+    $(New-DetailFieldHtml -Label 'Recurrence summary' -Value $Record.RecurrenceSummary)
+    $(New-DetailFieldHtml -Label 'Categories' -Value $Record.Categories)
+    $(New-DetailFieldHtml -Label 'Sensitivity' -Value $sensitivityText)
+    $(New-DetailFieldHtml -Label 'Folder' -Value $folderText)
+    $(New-DetailFieldHtml -Label 'Created' -Value (Format-RecordDateTime $Record.CreationTime))
+    $(New-DetailFieldHtml -Label 'Modified' -Value (Format-RecordDateTime $Record.LastModificationTime))
+    $(New-DetailFieldHtml -Label 'Message class' -Value $Record.MessageClass)
+    $(New-DetailFieldHtml -Label 'Entry ID' -Value $Record.EntryId)
+  </section>
+  $(Get-StaticAttachmentMetadataHtml -Attachments @($Record.Attachments))
+  <section class='record-section'>
+    <h3>Notes / body</h3>
+    <div class='body-block'>$(ConvertTo-HtmlBody $Record.Notes)</div>
+  </section>
+</article>
+"@)
+}
+
+function Write-ContactRecordHtml {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
+        [Parameter(Mandatory = $true)]$Record
+    )
+
+    $displayName = if ([string]::IsNullOrWhiteSpace([string]$Record.DisplayName)) { '(no display name)' } else { [string]$Record.DisplayName }
+    $folderText = [string](Get-PropSafe -Object $Record -Name 'FolderPath' -Default '')
+    $categoryValues = @(Split-RecordCategories $Record.Categories)
+    $categoryKeys = @($categoryValues | ForEach-Object { ConvertTo-NormalizedFilterText $_ })
+    $searchParts = @(
+        $Record.DisplayName, $Record.FullName, $Record.FirstName, $Record.MiddleName, $Record.LastName,
+        $Record.CompanyName, $Record.JobTitle, $Record.Department, $Record.Email1, $Record.Email2, $Record.Email3,
+        $Record.BusinessPhone, $Record.HomePhone, $Record.MobilePhone, $Record.OtherPhone,
+        $Record.BusinessAddress, $Record.HomeAddress, $Record.OtherAddress, $Record.WebPage,
+        (Format-RecordDate $Record.Birthday), (Format-RecordDate $Record.Anniversary),
+        ($categoryValues -join ' '), (@($Record.DistributionListMembers) -join ' '),
+        $folderText, $Record.Notes, $Record.BodyText, $Record.MessageClass, $Record.EntryId
+    )
+    foreach ($attachment in @($Record.Attachments)) {
+        $searchParts += @(
+            (Get-PropSafe -Object $attachment -Name 'FileName' -Default ''),
+            (Get-PropSafe -Object $attachment -Name 'DisplayName' -Default ''),
+            (Get-PropSafe -Object $attachment -Name 'Size' -Default '')
+        )
+    }
+    $searchText = ConvertTo-NormalizedFilterText ($searchParts -join ' ')
+    $subtitleParts = @($Record.CompanyName, $Record.JobTitle, $Record.Department | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $subtitle = if ($subtitleParts.Count -gt 0) { $subtitleParts -join ' | ' } else { '' }
+    $Writer.WriteLine(@"
+<article class='conversation record-card' data-search='$(ConvertTo-HtmlEncodedText $searchText)' data-folder='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $folderText))' data-categories='$(ConvertTo-JsonArrayAttributeValue $categoryKeys)'>
+  <header class='record-header'>
+    <div>
+      <h2>$(ConvertTo-HtmlEncodedText $displayName)</h2>
+      <div class='record-subtitle'>$(Get-RecordValueHtml $subtitle)</div>
+    </div>
+    <div class='badge-row'>
+      <span class='pill'>$(ConvertTo-HtmlEncodedText ([string](Get-PropSafe -Object $Record -Name 'MessageClass' -Default 'Contact')))</span>
+      <span class='pill'>$(ConvertTo-HtmlEncodedText $folderText)</span>
+    </div>
+  </header>
+  <section class='details-grid'>
+    $(New-DetailFieldHtml -Label 'Display name' -Value $Record.DisplayName)
+    $(New-DetailFieldHtml -Label 'Full name' -Value $Record.FullName)
+    $(New-DetailFieldHtml -Label 'First name' -Value $Record.FirstName)
+    $(New-DetailFieldHtml -Label 'Middle name' -Value $Record.MiddleName)
+    $(New-DetailFieldHtml -Label 'Last name' -Value $Record.LastName)
+    $(New-DetailFieldHtml -Label 'Organization' -Value $Record.CompanyName)
+    $(New-DetailFieldHtml -Label 'Job title' -Value $Record.JobTitle)
+    $(New-DetailFieldHtml -Label 'Department' -Value $Record.Department)
+    $(New-DetailFieldHtml -Label 'Email 1' -Value $Record.Email1)
+    $(New-DetailFieldHtml -Label 'Email 2' -Value $Record.Email2)
+    $(New-DetailFieldHtml -Label 'Email 3' -Value $Record.Email3)
+    $(New-DetailFieldHtml -Label 'Business phone' -Value $Record.BusinessPhone)
+    $(New-DetailFieldHtml -Label 'Home phone' -Value $Record.HomePhone)
+    $(New-DetailFieldHtml -Label 'Mobile phone' -Value $Record.MobilePhone)
+    $(New-DetailFieldHtml -Label 'Other phone' -Value $Record.OtherPhone)
+    $(New-DetailFieldHtml -Label 'Business address' -Value $Record.BusinessAddress)
+    $(New-DetailFieldHtml -Label 'Home address' -Value $Record.HomeAddress)
+    $(New-DetailFieldHtml -Label 'Other address' -Value $Record.OtherAddress)
+    $(New-DetailFieldHtml -Label 'Website' -Value $Record.WebPage)
+    $(New-DetailFieldHtml -Label 'Birthday' -Value (Format-RecordDate $Record.Birthday))
+    $(New-DetailFieldHtml -Label 'Anniversary' -Value (Format-RecordDate $Record.Anniversary))
+    $(New-DetailFieldHtml -Label 'Categories' -Value (($categoryValues -join ', ')))
+    $(New-DetailFieldHtml -Label 'Folder' -Value $folderText)
+    $(New-DetailFieldHtml -Label 'Created' -Value (Format-RecordDateTime $Record.CreationTime))
+    $(New-DetailFieldHtml -Label 'Modified' -Value (Format-RecordDateTime $Record.LastModificationTime))
+    $(New-DetailFieldHtml -Label 'Message class' -Value $Record.MessageClass)
+    $(New-DetailFieldHtml -Label 'Entry ID' -Value $Record.EntryId)
+  </section>
+  <section class='record-section'>
+    <h3>Distribution list members</h3>
+    $(New-RecordListHtml -Values @($Record.DistributionListMembers))
+  </section>
+  $(Get-StaticAttachmentMetadataHtml -Attachments @($Record.Attachments))
+  <section class='record-section'>
+    <h3>Notes / body</h3>
+    <div class='body-block'>$(ConvertTo-HtmlBody $Record.Notes)</div>
+  </section>
+</article>
+"@)
+}
+
+function Write-CalendarHtmlReport {
+    param(
+        [Parameter(Mandatory = $true)][object]$Records,
+        [Parameter(Mandatory = $true)]$PstItem,
+        [Parameter(Mandatory = $true)][string]$ReportPath,
+        [string]$LogPath = $script:LogPath
+    )
+
+    Write-ReportLog 'Preparing Calendar HTML report data.'
+    Write-ConversionStage -Stage 'PreparingReport'
+    $sorted = @($Records | Sort-Object @{ Expression = { if ($_.StartTime) { ([datetime]$_.StartTime).Ticks } else { 0 } } }, Subject, FolderPath)
+    $folderMap = [ordered]@{}
+    $typeMap = [ordered]@{}
+    foreach ($record in $sorted) {
+        $folderText = [string](Get-PropSafe -Object $record -Name 'FolderPath' -Default '')
+        $folderKey = ConvertTo-NormalizedFilterText $folderText
+        if (-not [string]::IsNullOrWhiteSpace($folderKey) -and -not $folderMap.Contains($folderKey)) { $folderMap[$folderKey] = $folderText }
+        $typeText = [string](Get-PropSafe -Object $record -Name 'ItemType' -Default '')
+        $typeKey = ConvertTo-NormalizedFilterText $typeText
+        if (-not [string]::IsNullOrWhiteSpace($typeKey) -and -not $typeMap.Contains($typeKey)) { $typeMap[$typeKey] = $typeText }
+    }
+    $folderOptions = @($folderMap.Keys | ForEach-Object { "<option value='$(ConvertTo-HtmlEncodedText $_)'>$(ConvertTo-HtmlEncodedText $folderMap[$_])</option>" })
+    $typeOptions = @($typeMap.Keys | ForEach-Object { "<option value='$(ConvertTo-HtmlEncodedText $_)'>$(ConvertTo-HtmlEncodedText $typeMap[$_])</option>" })
+
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
+    try {
+        Write-CalendarReportHeader -Writer $writer -PstItem $PstItem -SortedRecords $sorted -FolderOptions $folderOptions -TypeOptions $typeOptions -LogPath $LogPath
+        $writtenCount = 0
+        $totalCount = [Math]::Max(1, $sorted.Count)
+        foreach ($record in $sorted) {
+            Write-CalendarRecordHtml -Writer $writer -Record $record
+            $writtenCount++
+            if (($writtenCount -eq $totalCount) -or ($writtenCount % 100 -eq 0)) {
+                Write-ReportLog "Calendar HTML report progress: $writtenCount of $totalCount records."
+                Write-ConversionStage -Stage 'WritingReport' -Extra ("Written={0}|Total={1}" -f $writtenCount, $totalCount)
+            }
+        }
+        Write-StaticRecordReportFooter -Writer $writer -ScriptText (Get-CalendarReportScript)
+    }
+    finally {
+        $writer.Dispose()
+    }
+}
+
+function Write-ContactsHtmlReport {
+    param(
+        [Parameter(Mandatory = $true)][object]$Records,
+        [Parameter(Mandatory = $true)]$PstItem,
+        [Parameter(Mandatory = $true)][string]$ReportPath,
+        [string]$LogPath = $script:LogPath
+    )
+
+    Write-ReportLog 'Preparing Contacts HTML report data.'
+    Write-ConversionStage -Stage 'PreparingReport'
+    $sorted = @($Records | Sort-Object DisplayName, FullName, CompanyName, FolderPath)
+    $folderMap = [ordered]@{}
+    $categoryMap = [ordered]@{}
+    foreach ($record in $sorted) {
+        $folderText = [string](Get-PropSafe -Object $record -Name 'FolderPath' -Default '')
+        $folderKey = ConvertTo-NormalizedFilterText $folderText
+        if (-not [string]::IsNullOrWhiteSpace($folderKey) -and -not $folderMap.Contains($folderKey)) { $folderMap[$folderKey] = $folderText }
+
+        foreach ($category in @(Split-RecordCategories $record.Categories)) {
+            $categoryKey = ConvertTo-NormalizedFilterText $category
+            if (-not [string]::IsNullOrWhiteSpace($categoryKey) -and -not $categoryMap.Contains($categoryKey)) { $categoryMap[$categoryKey] = $category }
+        }
+    }
+    $folderOptions = @($folderMap.Keys | ForEach-Object { "<option value='$(ConvertTo-HtmlEncodedText $_)'>$(ConvertTo-HtmlEncodedText $folderMap[$_])</option>" })
+    $categoryOptions = @($categoryMap.Keys | ForEach-Object { "<option value='$(ConvertTo-HtmlEncodedText $_)'>$(ConvertTo-HtmlEncodedText $categoryMap[$_])</option>" })
+
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
+    try {
+        Write-ContactsReportHeader -Writer $writer -PstItem $PstItem -SortedRecords $sorted -FolderOptions $folderOptions -CategoryOptions $categoryOptions -LogPath $LogPath
+        $writtenCount = 0
+        $totalCount = [Math]::Max(1, $sorted.Count)
+        foreach ($record in $sorted) {
+            Write-ContactRecordHtml -Writer $writer -Record $record
+            $writtenCount++
+            if (($writtenCount -eq $totalCount) -or ($writtenCount % 100 -eq 0)) {
+                Write-ReportLog "Contacts HTML report progress: $writtenCount of $totalCount records."
+                Write-ConversionStage -Stage 'WritingReport' -Extra ("Written={0}|Total={1}" -f $writtenCount, $totalCount)
+            }
+        }
+        Write-StaticRecordReportFooter -Writer $writer -ScriptText (Get-ContactsReportScript)
+    }
+    finally {
+        $writer.Dispose()
+    }
+}
+
 function Resolve-EmailViewerExecutable {
     $candidates = @(
         $env:PURVIEW_EMAIL_VIEWER_PATH,
@@ -2072,8 +3142,8 @@ function Write-EmailDatabase {
 }
 
 function Invoke-ReportConversion {
-    if (-not $TeamsReport -and -not $EmailReport) {
-        $msg = 'At least one report type must be selected (TeamsReport and/or EmailReport).'
+    if (-not $TeamsReport -and -not $EmailReport -and -not $CalendarReport -and -not $ContactsReport) {
+        $msg = 'At least one report type must be selected (TeamsReport, EmailReport, CalendarReport, and/or ContactsReport).'
         Write-Output ("CONVERSION_ERROR|{0}ExitCode=2|Message={1}" -f (Get-RunIdField), ($msg -replace '[\r\n|]', ' '))
         throw $msg
     }
@@ -2099,20 +3169,36 @@ function Invoke-ReportConversion {
     $baseName = [IO.Path]::GetFileNameWithoutExtension($pstItem.Name) -replace '[^a-zA-Z0-9._-]', '_'
     $displayHtmlPath = Resolve-OutputFilePath -Path $OutputPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.html"
     $displayLogPath = Resolve-OutputFilePath -Path $LogPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.log"
-    $htmlPaths = Get-ReportOutputPaths -DisplayPath $displayHtmlPath -TeamsReport $TeamsReport -EmailReport $EmailReport
-    $logPaths = Get-ReportOutputPaths -DisplayPath $displayLogPath -TeamsReport $TeamsReport -EmailReport $EmailReport
+    $htmlPaths = Get-ReportOutputPaths -DisplayPath $displayHtmlPath -TeamsReport $TeamsReport -EmailReport $EmailReport -CalendarReport $CalendarReport -ContactsReport $ContactsReport
+    $logPaths = Get-ReportOutputPaths -DisplayPath $displayLogPath -TeamsReport $TeamsReport -EmailReport $EmailReport -CalendarReport $CalendarReport -ContactsReport $ContactsReport
 
     $script:TeamsOutputPath = $htmlPaths.TeamsPath
     $script:EmailOutputPath = $htmlPaths.EmailPath
+    $script:CalendarOutputPath = $htmlPaths.CalendarPath
+    $script:ContactsOutputPath = $htmlPaths.ContactsPath
     $script:TeamsLogPath = $logPaths.TeamsPath
     $script:EmailLogPath = $logPaths.EmailPath
-    $script:OutputPath = if ($TeamsReport) { $script:TeamsOutputPath } else { $script:EmailOutputPath }
-    $script:LogPath = if ($TeamsReport) { $script:TeamsLogPath } else { $script:EmailLogPath }
+    $script:CalendarLogPath = $logPaths.CalendarPath
+    $script:ContactsLogPath = $logPaths.ContactsPath
+    $script:OutputPath = @(
+        $script:TeamsOutputPath,
+        $script:EmailOutputPath,
+        $script:CalendarOutputPath,
+        $script:ContactsOutputPath
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+    $script:LogPath = @(
+        $script:TeamsLogPath,
+        $script:EmailLogPath,
+        $script:CalendarLogPath,
+        $script:ContactsLogPath
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
 
     if ($script:TeamsOutputPath) { Assert-OutputPathsSafe -ReportPath $script:TeamsOutputPath -LogPath $script:TeamsLogPath }
     if ($script:EmailOutputPath) { Assert-OutputPathsSafe -ReportPath $script:EmailOutputPath -LogPath $script:EmailLogPath }
+    if ($script:CalendarOutputPath) { Assert-OutputPathsSafe -ReportPath $script:CalendarOutputPath -LogPath $script:CalendarLogPath }
+    if ($script:ContactsOutputPath) { Assert-OutputPathsSafe -ReportPath $script:ContactsOutputPath -LogPath $script:ContactsLogPath }
 
-    foreach ($pathToPrepare in @($script:TeamsOutputPath, $script:EmailOutputPath, $script:TeamsLogPath, $script:EmailLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
+    foreach ($pathToPrepare in @($script:TeamsOutputPath, $script:EmailOutputPath, $script:CalendarOutputPath, $script:ContactsOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:CalendarLogPath, $script:ContactsLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
         $outDir = Split-Path -LiteralPath $pathToPrepare
         if ([string]::IsNullOrWhiteSpace($outDir)) { $outDir = $downloads }
         # New-Item has no -LiteralPath, and -Path treats [ ] as wildcards; use the .NET API so a
@@ -2125,7 +3211,7 @@ function Invoke-ReportConversion {
     # clears the file; UTF8Encoding($false) writes no BOM so the GUI log-tail parser reads the
     # first token cleanly; AutoFlush keeps lines visible to the live tail immediately.
     $script:LogWriters = @()
-    foreach ($logPath in @($script:TeamsLogPath, $script:EmailLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
+    foreach ($logPath in @($script:TeamsLogPath, $script:EmailLogPath, $script:CalendarLogPath, $script:ContactsLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
         $writer = [System.IO.StreamWriter]::new($logPath, $false, [System.Text.UTF8Encoding]::new($false))
         $writer.AutoFlush = $true
         $script:LogWriters += $writer
@@ -2141,6 +3227,8 @@ function Invoke-ReportConversion {
     $root = $null
     $teamsRecords = New-Object System.Collections.Generic.List[object]
     $emailRecords = New-Object System.Collections.Generic.List[object]
+    $calendarRecords = New-Object System.Collections.Generic.List[object]
+    $contactsRecords = New-Object System.Collections.Generic.List[object]
     $weAttached = $false
 
     try {
@@ -2151,8 +3239,10 @@ function Invoke-ReportConversion {
             $sample = Get-SampleRecord
             $sampleTeams = @($sample.Teams)
             $sampleEmail = @($sample.Email)
+            $sampleCalendar = @($sample.Calendar)
+            $sampleContacts = @($sample.Contacts)
             $script:Stats.FoldersScanned = 2
-            $script:Stats.ItemsAttempted = $sampleTeams.Count + $sampleEmail.Count
+            $script:Stats.ItemsAttempted = $sampleTeams.Count + $sampleEmail.Count + $sampleCalendar.Count + $sampleContacts.Count
             foreach ($record in $sampleTeams) {
                 if ($TeamsReport) {
                     [void]$teamsRecords.Add($record)
@@ -2167,6 +3257,26 @@ function Invoke-ReportConversion {
                 if ($EmailReport) {
                     [void]$emailRecords.Add($record)
                     $script:Stats.EmailItemsExported++
+                    $script:Stats.ItemsExported++
+                }
+                else {
+                    $script:Stats.ItemsSkipped++
+                }
+            }
+            foreach ($record in $sampleCalendar) {
+                if ($CalendarReport) {
+                    [void]$calendarRecords.Add($record)
+                    $script:Stats.CalendarItemsExported++
+                    $script:Stats.ItemsExported++
+                }
+                else {
+                    $script:Stats.ItemsSkipped++
+                }
+            }
+            foreach ($record in $sampleContacts) {
+                if ($ContactsReport) {
+                    [void]$contactsRecords.Add($record)
+                    $script:Stats.ContactsItemsExported++
                     $script:Stats.ItemsExported++
                 }
                 else {
@@ -2194,10 +3304,10 @@ function Invoke-ReportConversion {
             }
 
             $rootName = Get-PropSafe -Object $root -Name 'Name' -Default $pstItem.BaseName
-            Read-OutlookFolder -Folder $root -FolderPath $rootName -TeamsRecords $teamsRecords -EmailRecords $emailRecords
+            Read-OutlookFolder -Folder $root -FolderPath $rootName -TeamsRecords $teamsRecords -EmailRecords $emailRecords -CalendarRecords $calendarRecords -ContactsRecords $contactsRecords
         }
 
-        Write-ReportLog "Finished reading PST. Teams items: $($teamsRecords.Count); Email items: $($emailRecords.Count)"
+        Write-ReportLog "Finished reading PST. Teams items: $($teamsRecords.Count); Email items: $($emailRecords.Count); Calendar items: $($calendarRecords.Count); Contacts items: $($contactsRecords.Count)"
         Write-ConversionStage -Stage 'FinishedReading'
         if ($TeamsReport) {
             Write-ReportLog 'Writing Teams HTML report.'
@@ -2209,8 +3319,18 @@ function Invoke-ReportConversion {
             Write-EmailDatabase -Records $emailRecords.ToArray() -DatabasePath $script:EmailOutputPath
             Write-ReportLog "Email SQLite database written to $script:EmailOutputPath"
         }
+        if ($CalendarReport) {
+            Write-ReportLog 'Writing Calendar HTML report.'
+            Write-CalendarHtmlReport -Records $calendarRecords.ToArray() -PstItem $pstItem -ReportPath $script:CalendarOutputPath -LogPath $script:CalendarLogPath
+            Write-ReportLog "Calendar HTML report written to $script:CalendarOutputPath"
+        }
+        if ($ContactsReport) {
+            Write-ReportLog 'Writing Contacts HTML report.'
+            Write-ContactsHtmlReport -Records $contactsRecords.ToArray() -PstItem $pstItem -ReportPath $script:ContactsOutputPath -LogPath $script:ContactsLogPath
+            Write-ReportLog "Contacts HTML report written to $script:ContactsOutputPath"
+        }
         Write-ConversionStage -Stage 'ReportWritten'
-        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}|TeamsOutputPath={7}|EmailOutputPath={8}|TeamsLogPath={9}|EmailLogPath={10}|TeamsItemsExported={11}|EmailItemsExported={12}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $script:TeamsOutputPath, $script:EmailOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:Stats.TeamsItemsExported, $script:Stats.EmailItemsExported)
+        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}|TeamsOutputPath={7}|EmailOutputPath={8}|CalendarOutputPath={9}|ContactsOutputPath={10}|TeamsLogPath={11}|EmailLogPath={12}|CalendarLogPath={13}|ContactsLogPath={14}|TeamsItemsExported={15}|EmailItemsExported={16}|CalendarItemsExported={17}|ContactsItemsExported={18}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $script:TeamsOutputPath, $script:EmailOutputPath, $script:CalendarOutputPath, $script:ContactsOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:CalendarLogPath, $script:ContactsLogPath, $script:Stats.TeamsItemsExported, $script:Stats.EmailItemsExported, $script:Stats.CalendarItemsExported, $script:Stats.ContactsItemsExported)
     }
     catch {
         $fatalMessage = if ($_.Exception.Message) { $_.Exception.Message } else { [string]$_.Exception }

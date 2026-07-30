@@ -3,11 +3,11 @@ Set-StrictMode -Version Latest
 
 function Get-ReportPathBaseName {
     param([Parameter(Mandatory = $true)][string]$FilePath)
-    $dir = [IO.Path]::GetDirectoryName($FilePath)
     $name = [IO.Path]::GetFileNameWithoutExtension($FilePath)
-    $ext = [IO.Path]::GetExtension($FilePath)
     if ($name -match '(?i)_Teams$') { $name = $name.Substring(0, $name.Length - 6) }
     elseif ($name -match '(?i)_Email$') { $name = $name.Substring(0, $name.Length - 6) }
+    elseif ($name -match '(?i)_Calendar$') { $name = $name.Substring(0, $name.Length - 9) }
+    elseif ($name -match '(?i)_Contacts$') { $name = $name.Substring(0, $name.Length - 9) }
     return $name
 }
 
@@ -15,10 +15,12 @@ function Get-ReportOutputPaths {
     param(
         [Parameter(Mandatory = $true)][string]$DisplayPath,
         [Parameter(Mandatory = $true)][bool]$TeamsReport,
-        [Parameter(Mandatory = $true)][bool]$EmailReport
+        [Parameter(Mandatory = $true)][bool]$EmailReport,
+        [bool]$CalendarReport = $false,
+        [bool]$ContactsReport = $false
     )
-    if (-not $TeamsReport -and -not $EmailReport) {
-        throw 'At least one of TeamsReport or EmailReport must be true.'
+    if (-not $TeamsReport -and -not $EmailReport -and -not $CalendarReport -and -not $ContactsReport) {
+        throw 'At least one report type must be selected.'
     }
     $dir = [IO.Path]::GetDirectoryName($DisplayPath)
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
@@ -26,35 +28,33 @@ function Get-ReportOutputPaths {
     $isLogPath = $inputExt -in @('.log', '.txt')
     $teamsExt = if ($isLogPath) { $inputExt } else { '.html' }
     $emailExt = if ($isLogPath) { $inputExt } else { '.db' }
+    $calendarExt = if ($isLogPath) { $inputExt } else { '.html' }
+    $contactsExt = if ($isLogPath) { $inputExt } else { '.html' }
     $displayExt = if ($isLogPath) { $inputExt } else { '.html' }
     $base = Get-ReportPathBaseName -FilePath $DisplayPath
-    $teamsPath = $null
-    $emailPath = $null
-    $display = $null
-    if ($TeamsReport -and $EmailReport) {
-        $display = Join-Path $dir ($base + $displayExt)
-        $teamsPath = Join-Path $dir ($base + '_Teams' + $teamsExt)
-        $emailPath = Join-Path $dir ($base + '_Email' + $emailExt)
+    $teamsPath = if ($TeamsReport) { Join-Path $dir ($base + '_Teams' + $teamsExt) } else { $null }
+    $emailPath = if ($EmailReport) { Join-Path $dir ($base + '_Email' + $emailExt) } else { $null }
+    $calendarPath = if ($CalendarReport) { Join-Path $dir ($base + '_Calendar' + $calendarExt) } else { $null }
+    $contactsPath = if ($ContactsReport) { Join-Path $dir ($base + '_Contacts' + $contactsExt) } else { $null }
+    $selectedPaths = @(@($teamsPath, $emailPath, $calendarPath, $contactsPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $display = if (@($selectedPaths).Count -eq 1) { $selectedPaths[0] } else { Join-Path $dir ($base + $displayExt) }
+    [pscustomobject]@{
+        DisplayPath = $display
+        TeamsPath = $teamsPath
+        EmailPath = $emailPath
+        CalendarPath = $calendarPath
+        ContactsPath = $contactsPath
     }
-    elseif ($TeamsReport) {
-        $display = Join-Path $dir ($base + '_Teams' + $teamsExt)
-        $teamsPath = $display
-    }
-    else {
-        $display = Join-Path $dir ($base + '_Email' + $emailExt)
-        $emailPath = $display
-    }
-    [pscustomobject]@{ DisplayPath = $display; TeamsPath = $teamsPath; EmailPath = $emailPath }
 }
 
 function Get-WritePathsFromResultFields {
-    # Prefer typed Teams/Email write targets. Never treat dual-mode DisplayPath (OutputPath /
-    # LogPath when both reports are selected and typed paths exist) as a required file.
+    # Prefer typed report write targets. Never treat a multi-report DisplayPath (OutputPath /
+    # LogPath when multiple reports are selected and typed paths exist) as a required file.
     param([AllowNull()][hashtable]$Fields)
     if ($null -eq $Fields) { $Fields = @{} }
     $reportPaths = [System.Collections.Generic.List[string]]::new()
     $hasTypedReport = $false
-    foreach ($key in @('TeamsOutputPath', 'EmailOutputPath')) {
+    foreach ($key in @('TeamsOutputPath', 'EmailOutputPath', 'CalendarOutputPath', 'ContactsOutputPath')) {
         if ($Fields.ContainsKey($key)) {
             $path = [string]$Fields[$key]
             if (-not [string]::IsNullOrWhiteSpace($path)) {
@@ -69,7 +69,7 @@ function Get-WritePathsFromResultFields {
     }
     $logPaths = [System.Collections.Generic.List[string]]::new()
     $hasTypedLog = $false
-    foreach ($key in @('TeamsLogPath', 'EmailLogPath')) {
+    foreach ($key in @('TeamsLogPath', 'EmailLogPath', 'CalendarLogPath', 'ContactsLogPath')) {
         if ($Fields.ContainsKey($key)) {
             $path = [string]$Fields[$key]
             if (-not [string]::IsNullOrWhiteSpace($path)) {

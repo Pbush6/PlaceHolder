@@ -120,7 +120,18 @@ public sealed class MainForm : Form
             BackColor = palette.SubtleSurface,
             ForeColor = palette.MutedText,
             SizingGrip = false,
-            Items = { _databasePathStatus }
+            Items =
+            {
+                _databasePathStatus,
+                new ToolStripStatusLabel
+                {
+                    Name = "CreditStatus",
+                    Alignment = ToolStripItemAlignment.Right,
+                    Font = AppTheme.Font(7.5F),
+                    ForeColor = palette.MutedText,
+                    Text = "By Patrick Bush"
+                }
+            }
         });
         Controls.Add(menu);
         AppTheme.StyleButton(_openDatabase, ButtonKind.Primary);

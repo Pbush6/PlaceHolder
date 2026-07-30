@@ -19,6 +19,7 @@ $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $readmePath = Join-Path $repoRoot 'README.md'
 $buildScriptPath = Join-Path $repoRoot 'build.ps1'
 $viewerProjectPath = Join-Path $repoRoot 'EmailReviewViewer\EmailReviewViewer.App\EmailReviewViewer.App.csproj'
+$viewerMainFormPath = Join-Path $repoRoot 'EmailReviewViewer\EmailReviewViewer.App\MainForm.cs'
 $converterPath = Join-Path $repoRoot 'build\PurviewTeamsPstToHtmlConverter.exe'
 $debugConverterPath = Join-Path $repoRoot 'build\PurviewTeamsPstToHtmlConverter_Debug.exe'
 
@@ -40,7 +41,7 @@ function Resolve-DotnetSdkPath {
     throw 'A .NET SDK is required, but no dotnet executable with an installed SDK was found.'
 }
 
-foreach ($path in @($readmePath, $buildScriptPath, $viewerProjectPath)) {
+foreach ($path in @($readmePath, $buildScriptPath, $viewerProjectPath, $viewerMainFormPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required source file missing: $path"
     }
@@ -61,6 +62,9 @@ $viewerVersion = [string]$viewerProject.Project.PropertyGroup.Version
 if ($buildMatch.Groups[1].Value -ne $version -or $viewerVersion -ne $version) {
     throw "Version mismatch. README=$version build=$($buildMatch.Groups[1].Value) viewer=$viewerVersion"
 }
+if ([IO.File]::ReadAllText($viewerMainFormPath) -notmatch [regex]::Escape('By Patrick Bush')) {
+    throw "Email Reviewer credit is missing from $viewerMainFormPath"
+}
 
 $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
 $dotnet = Resolve-DotnetSdkPath
@@ -76,6 +80,10 @@ $releasesRoot = Join-Path $outputRoot 'Releases'
 $packageName = "PurviewTeamsPstToHtmlApp-$version-win-x64"
 $packageRoot = Join-Path $releasesRoot $packageName
 $zipPath = Join-Path $releasesRoot "$packageName.zip"
+$buildInputsRoot = Join-Path $outputRoot "BuildInputs\$packageName"
+$stagedConverterPath = Join-Path $buildInputsRoot 'PurviewTeamsPstToHtmlConverter.exe'
+$stagedDebugConverterPath = Join-Path $buildInputsRoot 'PurviewTeamsPstToHtmlConverter_Debug.exe'
+$stagedViewerPath = Join-Path $buildInputsRoot 'EmailReviewViewer.App.exe'
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "PurviewTeamsPstToHtmlApp-package-$PID"
 $viewerPublishRoot = Join-Path $tempRoot 'viewer'
 
@@ -114,6 +122,14 @@ try {
         throw "Published viewer executable missing: $publishedViewerPath"
     }
 
+    if (Test-Path -LiteralPath $buildInputsRoot) {
+        Remove-Item -LiteralPath $buildInputsRoot -Recurse -Force
+    }
+    [void][IO.Directory]::CreateDirectory($buildInputsRoot)
+    Copy-Item -LiteralPath $converterPath -Destination $stagedConverterPath
+    Copy-Item -LiteralPath $debugConverterPath -Destination $stagedDebugConverterPath
+    Copy-Item -LiteralPath $publishedViewerPath -Destination $stagedViewerPath
+
     if (Test-Path -LiteralPath $packageRoot) {
         Remove-Item -LiteralPath $packageRoot -Recurse -Force
     }
@@ -126,9 +142,9 @@ try {
     [void][IO.Directory]::CreateDirectory($toolsRoot)
     [void][IO.Directory]::CreateDirectory($viewerRoot)
 
-    Copy-Item -LiteralPath $converterPath -Destination (Join-Path $packageRoot 'PurviewTeamsPstToHtmlConverter.exe')
-    Copy-Item -LiteralPath $debugConverterPath -Destination (Join-Path $toolsRoot 'PurviewTeamsPstToHtmlConverter_Debug.exe')
-    Copy-Item -LiteralPath $publishedViewerPath -Destination (Join-Path $viewerRoot 'EmailReviewViewer.App.exe')
+    Copy-Item -LiteralPath $stagedConverterPath -Destination (Join-Path $packageRoot 'PurviewTeamsPstToHtmlConverter.exe')
+    Copy-Item -LiteralPath $stagedDebugConverterPath -Destination (Join-Path $toolsRoot 'PurviewTeamsPstToHtmlConverter_Debug.exe')
+    Copy-Item -LiteralPath $stagedViewerPath -Destination (Join-Path $viewerRoot 'EmailReviewViewer.App.exe')
 
     $quickStart = @"
 Purview PST Report Converter $version
@@ -144,13 +160,18 @@ QUICK START
 1. Extract the entire ZIP to a local folder. Keep the folder structure intact.
 2. Close Outlook before conversion.
 3. Run PurviewTeamsPstToHtmlConverter.exe.
-4. Choose the Purview PST, output location, and Teams, Email, or both reports.
+4. Choose the Purview PST and output location. Teams, Email, Calendar, and
+   Contacts reports are all selected by default; clear any report not needed.
 5. Start the conversion. The converter temporarily attaches the PST to Outlook.
 
 OUTPUTS
 - Teams report: <name>_Teams.html
 - Email database: <name>_Email.db
-- Logs: <name>_Teams.log and/or <name>_Email.log beside the outputs
+- Calendar report: <name>_Calendar.html
+- Contacts report: <name>_Contacts.html
+- Logs: a matching _Teams.log, _Email.log, _Calendar.log, or _Contacts.log
+  for each selected output
+- Teams, Calendar, and Contacts reports open in the default browser.
 - The Email Review Viewer opens the Email database automatically after conversion.
 
 To review an existing Email database, run
@@ -167,8 +188,8 @@ TROUBLESHOOTING
 - If Outlook COM is missing, install/repair classic Outlook and make it the
   registered desktop Outlook application. New Outlook alone is not sufficient.
 - Close Outlook before retrying PST attach/detach errors.
-- Conversion logs are written beside the selected report output as _Teams.log
-  and/or _Email.log. The debug converter is under Tools\ for support use.
+- Conversion logs are written beside each selected typed report output. The
+  debug converter is under Tools\ for support use.
 - Run Verify-Prerequisites.ps1 for a read-only prerequisite check.
 
 This release is portable and unsigned. Do not separate the converter from the
@@ -192,10 +213,15 @@ EmailReviewViewer folder.
   single-file host to the current user's temporary application cache.
 
 ## Product changes
+- Calendar and Contacts static HTML reports add offline search and typed filters.
+- Teams, Email, Calendar, and Contacts are selected by default and generated in
+  one PST scan; any subset can be selected.
+- Teams, Calendar, and Contacts HTML opens in the default browser after success.
 - Packaged converter locates and opens the bundled Email Review Viewer.
 - Viewer supports validated File > Open Database switching.
 - Email review includes SQLite FTS5 search, folder counts, paging, sorting, and
   on-demand full-message detail.
+- Email Review Viewer includes Patrick's bottom-right `By Patrick Bush` credit.
 
 ## Prerequisites and caveats
 - Converter requires Windows 10/11 x64, PowerShell 7, and classic Outlook COM.
@@ -302,7 +328,7 @@ Write-Host 'All prerequisites passed.' -ForegroundColor Green
 
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $fixedTimestamp = [DateTimeOffset]::new(2026, 7, 14, 0, 0, 0, [TimeSpan]::Zero)
+    $fixedTimestamp = [DateTimeOffset]::new(2026, 7, 29, 0, 0, 0, [TimeSpan]::Zero)
     $zipStream = [IO.File]::Open($zipPath, [IO.FileMode]::CreateNew)
     try {
         $archive = [IO.Compression.ZipArchive]::new($zipStream, [IO.Compression.ZipArchiveMode]::Create, $false)
@@ -338,6 +364,7 @@ Write-Host 'All prerequisites passed.' -ForegroundColor Green
     Write-Host ''
     Write-Host "Release folder: $packageRoot"
     Write-Host "ZIP:            $zipPath"
+    Write-Host "Build inputs:   $buildInputsRoot"
     Write-Host "Version:        $version"
     Write-Host "Files:          $($finalFiles.Count)"
     Write-Host ("Folder bytes:   {0:N0}" -f $totalBytes)

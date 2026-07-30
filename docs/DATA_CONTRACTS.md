@@ -1,19 +1,19 @@
-# Purview Teams PST → HTML — Data Contracts
+# Purview PST Reports — Data Contracts
 
-**Version:** 1.1.0.1
-**Last updated:** 2026-07-13
+**Version:** 1.2.0.0
+**Last updated:** 2026-07-29
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
 
 ## 1. Stdout pipe-delimited lines (core → launcher)
 
-All lines are single-line, pipe-separated `Key=Value` fields. Optional `RunId=<32-char-hex>` when `-RunId` is passed.
+All lines are single-line, pipe-separated `Key=Value` fields. Optional `RunId=<32-lowercase-hex>` when `-RunId` is passed. The JSON schema rejects malformed RunIds and unknown properties on every machine-line type.
 
 | Prefix | When emitted | Required fields |
 |--------|--------------|-----------------|
 | `CONVERSION_PROGRESS` | During PST scan | `ItemsAttempted`, `ItemsExported`, `FoldersScanned`, `ItemReadFailures`, `ElapsedSeconds`, `RatePerMinute`, `FolderPath` |
 | `CONVERSION_STAGE` | Report lifecycle | `Stage` (+ optional `Written`, `Total` for `WritingReport`); includes `ImportingEmailDatabase` |
-| `CONVERSION_RESULT` | Success only | `OutputPath`, `LogPath`, `ItemsExported`, `ItemReadFailures`, `AttachmentReadFailures`, `SubfolderScanFailures` + optional `TeamsOutputPath`, `EmailOutputPath`, `TeamsLogPath`, `EmailLogPath`, `TeamsItemsExported`, `EmailItemsExported` |
+| `CONVERSION_RESULT` | Success only | Backward-compatible `OutputPath`, `LogPath`, `ItemsExported`, failure counters; typed `TeamsOutputPath`, `EmailOutputPath`, `CalendarOutputPath`, `ContactsOutputPath`, corresponding typed log paths, and per-report exported counts |
 | `CONVERSION_ERROR` | Fatal failure (before throw) | `ExitCode`, `Message` (max 500 chars, no CR/LF/pipes) |
 
 **Schema:** `docs/schemas/stdout-contract.schema.json`
@@ -28,7 +28,7 @@ Format: `yyyy-MM-ddTHH:mm:ss [INFO|WARN|ERROR] message`
 - UTF-8 without BOM
 - Truncated fresh each run
 
-Summary line includes: `subfolderScanFailures` counter. When both reports are enabled, the result line also carries the per-report paths and item counts for Teams and Email.
+Summary line includes the `subfolderScanFailures` counter. The result line always carries all four typed output/log fields and per-report counts; paths for unselected reports are empty. The six-item sample exports 2 Teams, 2 Email, 1 Calendar, and 1 Contacts item (`ItemsExported=6`).
 
 ## 3. In-memory message record (core internal)
 
@@ -54,6 +54,10 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 
 **Email report:** SQLite database named `Base_Email.db`, with `EmailMessages`, `EmailMessagesFts`, indexes, and FTS maintenance triggers. The viewer pages metadata and loads a body only when selected.
 
+**Calendar report:** static HTML named `Base_Calendar.html`, with encoded appointment/meeting records and dataset-backed search/date/folder/type/all-day/recurrence filters.
+
+**Contacts report:** static HTML named `Base_Contacts.html`, with encoded contact/distribution-list records and dataset-backed text search, folder, and category filters.
+
 All user-controlled text passes `ConvertTo-HtmlEncodedText`.
 
 ## 5. Email NDJSON import
@@ -65,7 +69,7 @@ UTF-8 without BOM, one JSON object per physical line. Required data fields are `
 - `EntryId` is the unique duplicate key; missing values receive a deterministic SHA-256 fallback.
 - Import writes `<output>.importing`, validates final row count, then replaces the destination.
 - Staging NDJSON is removed only after importer exit code 0; failures log and retain its exact path.
-- Attachment summaries remain deferred in 1.1.0.1.
+- Email attachment summaries remain deferred in 1.2.0.0.
 
 ## 6. Launcher ↔ child process
 
@@ -76,7 +80,16 @@ UTF-8 without BOM, one JSON object per physical line. Required data fields are `
 | Stdout | Async queue (GUI) or synchronous drain (NoGui) |
 | Stderr | Concurrent drain (NoGui) to prevent pipe deadlock |
 | Cancel | `taskkill /T /F` + Job Object `KILL_ON_JOB_CLOSE` |
-| Success | ExitCode 0 **and** every requested typed report file exists on disk |
+| Report flags | Explicit `TeamsReport`, `EmailReport`, `CalendarReport`, `ContactsReport`; all default `true`; CLI and GUI reject all four `false` |
+| Legacy flag binding | A direct core/launcher call that explicitly binds `TeamsReport` and/or `EmailReport` while omitting both new flags uses legacy two-report behavior (`CalendarReport=false`, `ContactsReport=false`). Calls binding neither family retain all-four defaults. The current launcher always forwards all four flags explicitly. |
+| Success | ExitCode 0, valid `CONVERSION_RESULT`, and every selected report's typed output and typed log fields are non-empty and reference existing files |
+| Launch | Email `.db` opens in Email Reviewer; Teams/Calendar/Contacts HTML opens in the default browser, once per selected output and only after success |
+
+The no-console release EXE is compiled with PS2EXE `-NoOutput`. It therefore
+does not expose stdout or `CONVERSION_RESULT` to scripted consumers. Use the
+source launcher or packaged Debug converter for machine-readable stdout.
+Release `-NoGui` verification uses process exit, selected typed artifacts,
+typed logs, and their summary content.
 
 ## 7. JSON state files
 
@@ -89,11 +102,12 @@ UTF-8 without BOM, one JSON object per physical line. Required data fields are `
 
 | Source | Expected |
 |--------|----------|
-| `build.ps1` default | Bump on release |
-| `README.md` | Match shipped version |
-| Pester build test | Match `build.ps1 -Version` arg |
+| `build.ps1` default | `1.2.0.0` |
+| `README.md` | `1.2.0.0` |
+| Email Reviewer assembly/file version | `1.2.0.0` |
+| Pester build and release tests | `1.2.0.0` |
 
-**Current drift to resolve before release:** README/build/test version pins.
+Release 1.2.0.0 is aligned across source defaults, documentation, executable metadata, package naming, and release verification.
 
 ## Validation
 

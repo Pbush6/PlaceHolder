@@ -6,12 +6,12 @@ Describe 'Item report bucket' {
         . (Join-Path $PSScriptRoot '..\src\ReportClassification.ps1')
     }
 
-    It 'Teams folder wins even for IPM.Note' {
+    It 'Teams folder override wins even for IPM.Note' {
         Get-ItemReportBucket -FolderPath 'X\TeamsMessagesData' -MessageClass 'IPM.Note' | Should -Be 'Teams'
     }
 
-    It 'TeamsMeetings is Teams' {
-        Get-ItemReportBucket -FolderPath 'X\SkypeSpacesData\TeamsMeetings' -MessageClass 'IPM.AppointmentSnapshot.SkypeTeams.Meeting' | Should -Be 'Teams'
+    It 'TeamsMeetings folder keeps Teams precedence over calendar classes' {
+        Get-ItemReportBucket -FolderPath 'X\SkypeSpacesData\TeamsMeetings' -MessageClass 'IPM.Schedule.Meeting.Request' | Should -Be 'Teams'
     }
 
     It 'Inbox IPM.Note is Email' {
@@ -22,11 +22,23 @@ Describe 'Item report bucket' {
         Get-ItemReportBucket -FolderPath 'X\Inbox' -MessageClass 'IPM.Note.SMIME' | Should -Be 'Email'
     }
 
-    It 'meeting request is Skip' {
-        Get-ItemReportBucket -FolderPath 'X\Inbox' -MessageClass 'IPM.Schedule.Meeting.Request' | Should -Be 'Skip'
+    It 'meeting request is Calendar' {
+        Get-ItemReportBucket -FolderPath 'X\Inbox' -MessageClass 'IPM.Schedule.Meeting.Request' | Should -Be 'Calendar'
     }
 
-    It 'contact is Skip' {
-        Get-ItemReportBucket -FolderPath 'X\Contacts' -MessageClass 'IPM.Contact' | Should -Be 'Skip'
+    It 'appointment is Calendar' {
+        Get-ItemReportBucket -FolderPath 'X\Calendar' -MessageClass 'IPM.Appointment' | Should -Be 'Calendar'
+    }
+
+    It 'contact is Contacts' {
+        Get-ItemReportBucket -FolderPath 'X\Contacts' -MessageClass 'IPM.Contact' | Should -Be 'Contacts'
+    }
+
+    It 'distribution list is Contacts' {
+        Get-ItemReportBucket -FolderPath 'X\Contacts' -MessageClass 'IPM.DistList' | Should -Be 'Contacts'
+    }
+
+    It 'unknown class is Skip' {
+        Get-ItemReportBucket -FolderPath 'X\Misc' -MessageClass 'IPM.StickyNote' | Should -Be 'Skip'
     }
 }

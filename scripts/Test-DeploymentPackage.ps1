@@ -56,23 +56,52 @@ $checksumLines = @(
     Get-Content -LiteralPath $checksumPath |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 )
-$expectedChecksumCount = $files.Count - 1
-if ($checksumLines.Count -ne $expectedChecksumCount) {
-    throw "Checksum entry count mismatch. Expected $expectedChecksumCount, found $($checksumLines.Count)."
-}
 
+$manifestEntries = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($line in $checksumLines) {
     if ($line -notmatch '^([0-9A-Fa-f]{64}) \*(.+)$') {
         throw "Invalid checksum line: $line"
     }
     $expectedHash = $Matches[1].ToUpperInvariant()
     $relativePath = $Matches[2].Replace('/', '\')
-    $filePath = Join-Path $packageRoot $relativePath
-    if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-        throw "Checksum references missing file: $relativePath"
+    if ([string]::IsNullOrWhiteSpace($relativePath)) {
+        throw 'Checksum path cannot be empty.'
     }
-    $actualHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash
-    if ($actualHash -ne $expectedHash) {
+    if ([IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '^[A-Za-z]:') {
+        throw "Manifest contains an absolute checksum path: $relativePath"
+    }
+    if (@($relativePath -split '[\\/]' | Where-Object { $_ -eq '..' }).Count -gt 0) {
+        throw "Manifest checksum path contains parent traversal: $relativePath"
+    }
+    $resolvedPath = [IO.Path]::GetFullPath((Join-Path $packageRoot $relativePath))
+    $packagePrefix = $packageRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedPath.StartsWith($packagePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Manifest checksum path escapes the package root: $relativePath"
+    }
+    if ($manifestEntries.ContainsKey($relativePath)) {
+        throw "Duplicate checksum entry: $relativePath"
+    }
+    $manifestEntries.Add($relativePath, $expectedHash)
+}
+
+$actualFiles = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($file in @($files | Where-Object { $_.FullName -ne $checksumPath })) {
+    $relativePath = $file.FullName.Substring($packageRoot.Length).TrimStart('\', '/')
+    $actualFiles.Add($relativePath, $file.FullName)
+}
+
+$missingEntries = @($actualFiles.Keys | Where-Object { -not $manifestEntries.ContainsKey($_) } | Sort-Object)
+if ($missingEntries.Count -gt 0) {
+    throw "Missing checksum entry for package file(s): $($missingEntries -join '; ')"
+}
+$missingFiles = @($manifestEntries.Keys | Where-Object { -not $actualFiles.ContainsKey($_) } | Sort-Object)
+if ($missingFiles.Count -gt 0) {
+    throw "Checksum entry references missing package file(s): $($missingFiles -join '; ')"
+}
+
+foreach ($relativePath in $manifestEntries.Keys) {
+    $actualHash = (Get-FileHash -LiteralPath $actualFiles[$relativePath] -Algorithm SHA256).Hash
+    if ($actualHash -ne $manifestEntries[$relativePath]) {
         throw "Checksum mismatch: $relativePath"
     }
 }
@@ -86,5 +115,5 @@ $totalBytes = [int64]$(
     PackageRoot = $packageRoot
     FileCount = $files.Count
     TotalBytes = $totalBytes
-    ChecksumsVerified = $checksumLines.Count
+    ChecksumsVerified = $manifestEntries.Count
 }

@@ -14,7 +14,7 @@ corrupted the embed line).
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '1.1.0.1'
+    [string]$Version = '1.2.0.0'
 )
 
 Set-StrictMode -Version Latest
@@ -46,6 +46,8 @@ function Assert-SourceContains {
 
 Assert-SourceContains -Path $core -Snippet 'function Get-ReportOutputPaths' -Label 'core helper Get-ReportOutputPaths'
 Assert-SourceContains -Path $core -Snippet 'function Get-ItemReportBucket' -Label 'core helper Get-ItemReportBucket'
+Assert-SourceContains -Path $core -Snippet 'function Write-CalendarHtmlReport' -Label 'core writer Write-CalendarHtmlReport'
+Assert-SourceContains -Path $core -Snippet 'function Write-ContactsHtmlReport' -Label 'core writer Write-ContactsHtmlReport'
 Assert-SourceContains -Path $launcher -Snippet 'function Get-ReportOutputPaths' -Label 'launcher helper Get-ReportOutputPaths'
 [void][IO.Directory]::CreateDirectory($buildDir)
 
@@ -73,14 +75,14 @@ Import-Module ps2exe -Force
 $common = @{
     InputFile   = $launcher
     IconFile    = $icon
-    Description = 'Converts Microsoft Purview PST exports into Teams HTML and Email SQLite reports'
+    Description = 'Converts Microsoft Purview PST exports into Teams, Email, Calendar, and Contacts reports'
     Company     = 'Perfection Learning'
     Product     = 'Purview PST Report Converter'
     Copyright   = 'Perfection Learning'
     Version     = $Version
 }
 Invoke-PS2EXE @common -OutputFile $debugOut -STA -X64 -Title 'Purview Teams PST to HTML Converter (Debug)'
-Invoke-PS2EXE @common -OutputFile $releaseOut -NoConsole -STA -X64 -Title 'Purview Teams PST to HTML Converter'
+Invoke-PS2EXE @common -OutputFile $releaseOut -NoConsole -NoOutput -STA -X64 -Title 'Purview Teams PST to HTML Converter'
 
 Write-Host "=== built $Version ==="
 Get-Item -LiteralPath $debugOut, $releaseOut | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize

@@ -2,6 +2,14 @@
 
 Generated: 2026-07-03
 
+## Version 1.2.0.0 packaging (2026-07-29)
+
+- Builds the converter with the current embedded four-report core.
+- Adds Calendar (`_Calendar.html`) and Contacts (`_Contacts.html`) static reports alongside Teams HTML and Email SQLite.
+- Packages the final self-contained Email Reviewer, including the bottom-right `By Patrick Bush` credit.
+- Builds the no-console release converter with PS2EXE `-NoOutput`; scripts that require stdout/`CONVERSION_RESULT` must use the source launcher or packaged Debug converter. Release `-NoGui` success is verified from exit code, typed artifacts/logs, and log summaries.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.2.0.0-win-x64.zip`.
+
 ## Version 1.1.0.1 packaging (2026-07-13)
 
 - Packaged viewer discovery starts from the running converter executable directory, with source and build fallbacks for development runs.

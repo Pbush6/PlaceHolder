@@ -325,6 +325,20 @@ public sealed class EmailRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void MainForm_credits_Patrick_in_small_type_at_bottom_right()
+    {
+        using var form = new EmailReviewViewer.App.MainForm(null);
+        form.CreateControl();
+        var status = Assert.Single(form.Controls.OfType<System.Windows.Forms.StatusStrip>());
+        var credit = Assert.Single(status.Items.Cast<System.Windows.Forms.ToolStripItem>()
+            .Where(item => item.Name == "CreditStatus"));
+
+        Assert.Equal("By Patrick Bush", credit.Text);
+        Assert.Equal(System.Windows.Forms.ToolStripItemAlignment.Right, credit.Alignment);
+        Assert.True(credit.Font.Size <= 8F);
+    }
+
+    [Fact]
     public async Task MainForm_results_heading_shows_filtered_message_total()
     {
         using var repository = await CreateSeededRepositoryAsync();
