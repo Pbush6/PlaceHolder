@@ -27,7 +27,7 @@ internal static class Program
             var smoke = args.FirstOrDefault()?.Equals("--smoke-ui", StringComparison.OrdinalIgnoreCase) == true;
             string? databasePath = smoke
                 ? GetPath(args, 1)
-                : args.Length > 0 ? Path.GetFullPath(args[0]) : null;
+                : args.Length > 0 ? DatabaseArgument.Resolve(args[0]) : null;
 
             ApplicationConfiguration.Initialize();
             using var form = new MainForm(databasePath);

@@ -65,7 +65,7 @@ Describe 'Conversion dashboard report' {
     }
 
     It 'defines the dashboard writer, path helper, and email launch helper writer' {
-        foreach ($name in @('Write-DashboardHtmlReport', 'Get-DashboardOutputPath', 'Write-EmailReportLaunchHelper', 'Get-DashboardReportEntries')) {
+        foreach ($name in @('Write-DashboardHtmlReport', 'Get-DashboardOutputPath', 'Write-EmailReportLaunchHelper', 'Get-DashboardReportEntries', 'Register-EmailReportProtocolHandler', 'Get-EmailReportProtocolUrl')) {
             $functionAst = $script:coreAst.Find({
                 param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
@@ -111,6 +111,7 @@ Describe 'Conversion dashboard report' {
         $dashboardHtml | Should -Match 'dashboard-all_Contacts\.html'
         $dashboardHtml | Should -Match 'Open-EmailReport\.cmd'
         $dashboardHtml | Should -Match 'dashboard-all_Email\.db'
+        $dashboardHtml | Should -Match "href='purview-email:[^']*dashboard-all_Email\.db'"
         $dashboardHtml | Should -Match "class='dashboard-open'"
         ([regex]::Matches($dashboardHtml, "class='dashboard-open'[^>]*target='_blank'")).Count |
             Should -Be 4 -Because 'reports open in a new tab so the dashboard stays available'
@@ -165,6 +166,33 @@ Describe 'Conversion dashboard report' {
         $html | Should -Match 'data-item-count=.2.'
         $html | Should -Match 'Items: 4'
         $html | Should -Match 'Attachments: 7'
+    }
+
+    It 'builds a purview-email URL that survives spaces and reserved characters' {
+        $databasePath = Join-Path $TestDrive 'Review files\case (final) & more_Email.db'
+
+        $url = Get-EmailReportProtocolUrl -DatabasePath $databasePath
+
+        $url | Should -BeLike 'purview-email:*'
+        $url | Should -Not -Match '[ &]'
+        [Uri]::UnescapeDataString($url.Substring('purview-email:'.Length)) |
+            Should -Be ([IO.Path]::GetFullPath($databasePath))
+    }
+
+    It 'registers the purview-email handler against the viewer executable' {
+        $registryPath = 'HKCU:\Software\PurviewTeamsPstToHtmlAppTests\purview-email'
+        $viewerPath = Join-Path $TestDrive 'EmailReviewViewer.App.exe'
+        try {
+            Register-EmailReportProtocolHandler -ViewerPath $viewerPath -RegistryPath $registryPath
+
+            (Get-ItemProperty -LiteralPath $registryPath).'(default)' | Should -Be 'URL:Purview Email Report'
+            (Get-ItemProperty -LiteralPath $registryPath).'URL Protocol' | Should -Be ''
+            (Get-ItemProperty -LiteralPath (Join-Path $registryPath 'shell\open\command')).'(default)' |
+                Should -Be ('"{0}" "%1"' -f $viewerPath)
+        }
+        finally {
+            Remove-Item -LiteralPath 'HKCU:\Software\PurviewTeamsPstToHtmlAppTests' -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     It 'HTML-encodes hostile PST and report names' {

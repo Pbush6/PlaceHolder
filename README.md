@@ -124,7 +124,8 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 - Calendar HTML provides a navigable month grid, a scrollable chronological agenda of all matching meetings, and a sticky appointment detail pane. Agenda rows and month chips share selection; clicking an agenda item outside the visible month jumps the grid to that month. Search, date, folder, item-type, all-day, and recurring filters update both views.
 - Contacts HTML supports text search plus folder and category filters.
 - Email Review Viewer provides SQLite FTS5 search, folder filtering, date filtering, sorting, paging, and on-demand message detail.
-- After a successful conversion, the GUI opens only `Base_Dashboard.html` in the default browser. The dashboard summarizes each report and links to it; Teams, Calendar, and Contacts open in the browser, and Email opens through the generated `Open-EmailReport.cmd`, which starts `EmailReviewViewer.App.exe` with the `.db`. Nothing is launched after a failed or incomplete conversion.
+- After a successful conversion, the GUI opens only `Base_Dashboard.html` in the default browser. The dashboard summarizes each report and links to it; every link opens in a new tab so the dashboard stays available. Nothing is launched after a failed or incomplete conversion.
+- Teams, Calendar, and Contacts open in the browser. Email opens through a `purview-email:` link, which the browser confirms once ("Open Email Review Viewer?") before starting the viewer with the `.db`. Producing an Email report registers that protocol for the current user only (`HKCU\Software\Classes\purview-email`), pointing at the resolved `EmailReviewViewer.App.exe`; the generated `Open-EmailReport.cmd` remains in the output folder as a fallback.
 - **Open Report** in the GUI reopens the dashboard when it exists and otherwise falls back to the individual reports.
 - In Email Review Viewer, use **File > Open Database…** or the **Open Database…** button to open or switch `.db` files. Invalid, corrupt, and incompatible databases are rejected without replacing the current database.
 
@@ -140,7 +141,7 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 
 - Every conversion writes `Base_Dashboard.html`, a landing page with one summary card per report produced and a link to open each one.
 - The GUI opens only the dashboard after a successful conversion and no longer has report checkboxes; all four reports always run. CLI report flags are unchanged.
-- Email opens from the dashboard through the generated `Open-EmailReport.cmd`.
+- Email opens from the dashboard through a per-user `purview-email:` protocol handler that starts Email Review Viewer; `Open-EmailReport.cmd` stays as a fallback. Report links open in a new tab.
 - `CONVERSION_RESULT` gained a trailing `DashboardOutputPath` field.
 
 ## Earlier changes (2026-07-30)

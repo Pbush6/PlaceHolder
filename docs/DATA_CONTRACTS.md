@@ -60,7 +60,9 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 
 **Dashboard:** static HTML named `Base_Dashboard.html`, written on every successful run. It carries a run summary (PST name, generated timestamp, items exported, folders scanned, item/attachment read warnings) and one `dashboard-card` per report produced, marked with `data-report='teams|email|calendar|contacts'` and `data-item-count`. Cards are omitted for reports that were not produced. Links are file names relative to the dashboard, so the dashboard and its reports must stay in the same folder.
 
-**Email launch helper:** `Open-EmailReport.cmd`, written beside the reports only when the Email report is produced. The dashboard Email card links to it because a browser cannot start `EmailReviewViewer.App.exe` directly. It prefers `PURVIEW_EMAIL_VIEWER_PATH`, falls back to the viewer path resolved when the helper was generated, and reports the searched path and pauses when the viewer or `.db` is missing.
+**Email launch protocol:** producing an Email report registers `HKCU\Software\Classes\purview-email` with `URL Protocol` and `shell\open\command` = `"<resolved viewer>" "%1"`, and the dashboard Email card links to `purview-email:<url-encoded absolute .db path>`. The viewer's `DatabaseArgument.Resolve` strips the scheme, unescapes, and treats the remainder as the database path. Registration failure is non-fatal: the core logs a warning and the card falls back to the launch helper.
+
+**Email launch helper:** `Open-EmailReport.cmd`, written beside the reports only when the Email report is produced, as the fallback path when the protocol is unavailable or blocked. It prefers `PURVIEW_EMAIL_VIEWER_PATH`, falls back to the viewer path resolved when the helper was generated, and reports the searched path and pauses when the viewer or `.db` is missing.
 
 All user-controlled text passes `ConvertTo-HtmlEncodedText`.
 

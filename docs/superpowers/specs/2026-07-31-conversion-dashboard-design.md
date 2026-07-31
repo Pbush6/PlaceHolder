@@ -22,13 +22,16 @@ only that page after a successful run.
 | What opens after success | Dashboard only |
 | Dashboard content | High-level summary per report plus an Open action; no previews or embedded report data |
 | Dashboard location | Generated HTML file beside the reports: `<Base>_Dashboard.html` |
-| Email open action | Generated sibling helper `Open-EmailReport.cmd` that starts Email Reviewer with the `.db` |
+| Email open action | Per-user `purview-email:` protocol handler pointing at the viewer, with `Open-EmailReport.cmd` as the fallback |
 | Ownership | Core converter writes both new artifacts |
 | GUI report selection | Removed; the GUI always runs all four reports |
 | CLI report selection | `-TeamsReport` / `-EmailReport` / `-CalendarReport` / `-ContactsReport` remain for automation |
 
-A browser page cannot launch `EmailReviewViewer.App.exe` directly, which is why the Email card points
-at a generated `.cmd` helper instead of the `.db` file.
+A browser page cannot launch `EmailReviewViewer.App.exe` directly. The original design linked the
+Email card to a generated `.cmd` helper, but browsers never execute a local `.cmd`; they display or
+download it. The card therefore uses a `purview-email:` URL backed by a per-user protocol handler
+that points straight at the viewer, so the browser's confirmation prompt names Email Review Viewer.
+The `.cmd` helper stays in the output folder for when the protocol is unavailable or blocked.
 
 ## Architecture
 
@@ -65,6 +68,17 @@ Page contents:
 - Reports that were not produced are omitted rather than shown as empty or failed.
 
 All dynamic values are HTML-encoded with the existing `ConvertTo-HtmlEncodedText` helper.
+
+### Email launch protocol (core + viewer)
+
+When the Email report is produced, the core registers `HKCU\Software\Classes\purview-email` with
+`shell\open\command` = `"<resolved viewer>" "%1"` and links the Email card to
+`purview-email:<url-encoded absolute .db path>`. `DatabaseArgument.Resolve` in the viewer strips the
+scheme and unescapes the path, so the viewer opens the database exactly as it would from a plain
+path argument. Registration touches only the current user's hive, needs no elevation, and a failure
+is logged and downgraded to the `.cmd` helper link rather than failing the run.
+
+Report links carry `target='_blank'` so opening a report leaves the dashboard in place.
 
 ### Email launch helper (core)
 

@@ -101,6 +101,7 @@ $script:LogWriters = @()
 
 $script:DashboardOutputPath = $null
 $script:EmailLaunchHelperPath = $null
+$script:EmailReportUrl = $null
 
 function ConvertTo-NormalizedInputPath {
     param([AllowNull()][string]$Path)
@@ -3518,8 +3519,8 @@ function Get-DashboardReportEntries {
             Key = 'email'; Name = 'Email'; OutputPath = $script:EmailOutputPath; LogPath = $script:EmailLogPath
             ItemCount = $script:Stats.EmailItemsExported
             Description = 'Searchable message database for Email Review Viewer.'
-            LinkPath = $script:EmailLaunchHelperPath
-            Note = 'Starts Email Review Viewer. If the browser blocks the file, run Open-EmailReport.cmd from the output folder.'
+            LinkPath = if ($script:EmailReportUrl) { $script:EmailReportUrl } else { $script:EmailLaunchHelperPath }
+            Note = 'Starts Email Review Viewer; your browser asks for permission the first time. If it is blocked, run Open-EmailReport.cmd from the output folder.'
         },
         [pscustomobject]@{
             Key = 'calendar'; Name = 'Calendar'; OutputPath = $script:CalendarOutputPath; LogPath = $script:CalendarLogPath
@@ -3544,10 +3545,33 @@ function Get-DashboardReportEntries {
 }
 
 function ConvertTo-DashboardHref {
-    # Dashboard links are siblings of the dashboard file, so only the file name is needed.
+    # Report links are siblings of the dashboard file, so only the file name is needed. The Email
+    # card instead carries a purview-email: URL, which is already a finished href.
     param([AllowNull()][string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    if ($Path -match '(?i)^purview-email:') { return $Path }
     return [Uri]::EscapeDataString([IO.Path]::GetFileName($Path))
+}
+
+function Get-EmailReportProtocolUrl {
+    param([Parameter(Mandatory = $true)][string]$DatabasePath)
+    return ('purview-email:' + [Uri]::EscapeDataString([IO.Path]::GetFullPath($DatabasePath)))
+}
+
+function Register-EmailReportProtocolHandler {
+    # A browser cannot hand a file path to a desktop program, so the dashboard Email card uses a
+    # purview-email: URL. The handler points straight at the viewer, which decodes the URL itself,
+    # which is also what makes the browser name Email Review Viewer in its confirmation prompt.
+    param(
+        [Parameter(Mandatory = $true)][string]$ViewerPath,
+        [string]$RegistryPath = 'HKCU:\Software\Classes\purview-email'
+    )
+
+    $commandPath = Join-Path $RegistryPath 'shell\open\command'
+    New-Item -Path $commandPath -Force | Out-Null
+    Set-ItemProperty -LiteralPath $RegistryPath -Name '(default)' -Value 'URL:Purview Email Report'
+    Set-ItemProperty -LiteralPath $RegistryPath -Name 'URL Protocol' -Value ''
+    Set-ItemProperty -LiteralPath $commandPath -Name '(default)' -Value ('"{0}" "%1"' -f $ViewerPath)
 }
 
 function Write-EmailReportLaunchHelper {
@@ -3940,6 +3964,14 @@ function Invoke-ReportConversion {
         if ($EmailReport) {
             Write-EmailReportLaunchHelper -DatabasePath $script:EmailOutputPath -HelperPath $script:EmailLaunchHelperPath
             Write-ReportLog "Email launch helper written to $script:EmailLaunchHelperPath"
+            try {
+                Register-EmailReportProtocolHandler -ViewerPath (Resolve-EmailViewerExecutable)
+                $script:EmailReportUrl = Get-EmailReportProtocolUrl -DatabasePath $script:EmailOutputPath
+                Write-ReportLog 'Registered the purview-email protocol handler for the current user.'
+            }
+            catch {
+                Write-ReportLog "Could not register the purview-email protocol handler; the dashboard will link to the launch helper instead. $($_.Exception.Message)" 'WARN'
+            }
         }
         Write-ReportLog 'Writing conversion dashboard.'
         Write-DashboardHtmlReport -PstItem $pstItem -ReportPath $script:DashboardOutputPath -Entries (Get-DashboardReportEntries)
