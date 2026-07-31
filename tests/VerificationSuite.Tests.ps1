@@ -53,7 +53,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $launcherText | Should -Match '\[bool\]\$ContactsReport = \$true'
         $launcherText | Should -Match '(?s)ConvertTo-ArgumentList .* -TeamsReport:\$TeamsReport -EmailReport:\$EmailReport -CalendarReport:\$CalendarReport -ContactsReport:\$ContactsReport'
         $launcherText | Should -Match '(?s)Invoke-EmbeddedConversion .* -TeamsReport:\$TeamsReport -EmailReport:\$EmailReport -CalendarReport:\$CalendarReport -ContactsReport:\$ContactsReport'
-        $launcherText | Should -Match '(?s)Start-EmbeddedConversionProcess .* -TeamsReport:\$teamsCheck\.Checked -EmailReport:\$emailCheck\.Checked -CalendarReport:\$calendarCheck\.Checked -ContactsReport:\$contactsCheck\.Checked'
+        $launcherText | Should -Match '(?s)Start-EmbeddedConversionProcess .* -TeamsReport:\$true -EmailReport:\$true -CalendarReport:\$true -ContactsReport:\$true'
     }
 
     It 'runs the core sample path successfully with all four reports by default' {

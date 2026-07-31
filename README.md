@@ -8,7 +8,8 @@ Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calend
 ## What it does
 
 - Temporarily attaches a PST via Outlook COM and scans it once.
-- All four report types are selected by default and are produced in one PST scan.
+- Produces all four report types in one PST scan; the GUI has no report selection.
+- Writes `Base_Dashboard.html`, a landing page that summarizes every report produced and links to each one.
 - Writes Teams items to `Base_Teams.html`.
 - Writes Email items to `Base_Email.db`; Email HTML is no longer generated.
 - Writes appointments and meetings to `Base_Calendar.html` with a month grid, chronological agenda, and synchronized detail pane.
@@ -16,7 +17,7 @@ Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calend
 - Exports Teams items from `TeamsMessagesData`, `TeamsMeetings`, `Migrated-Teams-Chat`, or `SubstrateHolds`.
 - Exports Email items when that report is enabled using the message-class classifier (`IPM.Note*`, excluding meeting classes).
 - Exports Calendar items from Outlook calendar folders and Contacts items from Outlook contacts folders.
-- GUI launcher (`PurviewTeamsPstToHtmlConverter.exe`) with progress, cancel, and automatic report open.
+- GUI launcher (`PurviewTeamsPstToHtmlConverter.exe`) with progress, cancel, and automatic dashboard open.
 - Core converter (`Convert-PurviewTeamsPstToHtml.ps1`) runs under PowerShell 7 (`pwsh -Sta`).
 - After conversion, verifies the PST was detached from Outlook (unless **Keep PST attached** is checked).
 - If the PST was already attached before the run, reuses it and leaves it attached when finished.
@@ -115,15 +116,16 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 
 ## Four-report behavior
 
-- Teams, Email, Calendar, and Contacts are selected by default in the GUI. The checkboxes map to the four corresponding `*Report` switches.
-- The shared base path produces `_Teams.html`, `_Email.db`, `_Calendar.html`, and `_Contacts.html`, plus one typed `.log` file for each selected report.
-- Any subset may be selected; only those reports and logs are written. If all four are unchecked, the core exits with `CONVERSION_ERROR`.
+- The GUI always generates Teams, Email, Calendar, and Contacts; it no longer has report checkboxes.
+- `-NoGui` and direct core calls keep `-TeamsReport`, `-EmailReport`, `-CalendarReport`, and `-ContactsReport` for automation. Any subset may be requested; only those reports and logs are written, and the dashboard lists only what was produced. If all four are false, the core exits with `CONVERSION_ERROR`.
+- The shared base path produces `_Teams.html`, `_Email.db`, `_Calendar.html`, `_Contacts.html`, and `_Dashboard.html`, plus one typed `.log` file for each report produced.
 - Email records are staged as UTF-8 NDJSON, imported into a temporary SQLite database, count-validated, then renamed into place.
 - Teams HTML supports participant/conversation text search plus date and sort filters.
 - Calendar HTML provides a navigable month grid, a scrollable chronological agenda of all matching meetings, and a sticky appointment detail pane. Agenda rows and month chips share selection; clicking an agenda item outside the visible month jumps the grid to that month. Search, date, folder, item-type, all-day, and recurring filters update both views.
 - Contacts HTML supports text search plus folder and category filters.
 - Email Review Viewer provides SQLite FTS5 search, folder filtering, date filtering, sorting, paging, and on-demand message detail.
-- After a successful conversion, the GUI opens Teams, Calendar, and Contacts HTML in the default browser and opens Email databases in `EmailReviewViewer.App.exe`. Reports are not launched after a failed or incomplete conversion.
+- After a successful conversion, the GUI opens only `Base_Dashboard.html` in the default browser. The dashboard summarizes each report and links to it; Teams, Calendar, and Contacts open in the browser, and Email opens through the generated `Open-EmailReport.cmd`, which starts `EmailReviewViewer.App.exe` with the `.db`. Nothing is launched after a failed or incomplete conversion.
+- **Open Report** in the GUI reopens the dashboard when it exists and otherwise falls back to the individual reports.
 - In Email Review Viewer, use **File > Open Database…** or the **Open Database…** button to open or switch `.db` files. Invalid, corrupt, and incompatible databases are rejected without replacing the current database.
 
 ## Related paths
@@ -134,7 +136,14 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
 
-## Recent changes (2026-07-30)
+## Recent changes (2026-07-31, experimental)
+
+- Every conversion writes `Base_Dashboard.html`, a landing page with one summary card per report produced and a link to open each one.
+- The GUI opens only the dashboard after a successful conversion and no longer has report checkboxes; all four reports always run. CLI report flags are unchanged.
+- Email opens from the dashboard through the generated `Open-EmailReport.cmd`.
+- `CONVERSION_RESULT` gained a trailing `DashboardOutputPath` field.
+
+## Earlier changes (2026-07-30)
 
 - Version 1.2.1.0 redesigns Calendar review as a three-pane month grid, chronological agenda of all matching meetings, and synchronized appointment detail pane.
 - Detail fields omit Message class and Entry ID; All-day appears only for all-day appointments.

@@ -32,6 +32,7 @@ Describe 'Stdout JSON schema contract' {
                 EmailOutputPath = 'C:\Reports\case_Email.db'
                 CalendarOutputPath = 'C:\Reports\case_Calendar.html'
                 ContactsOutputPath = 'C:\Reports\case_Contacts.html'
+                DashboardOutputPath = 'C:\Reports\case_Dashboard.html'
                 TeamsLogPath = 'C:\Reports\case_Teams.log'
                 EmailLogPath = 'C:\Reports\case_Email.log'
                 CalendarLogPath = 'C:\Reports\case_Calendar.log'

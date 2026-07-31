@@ -8,6 +8,7 @@ function Get-ReportPathBaseName {
     elseif ($name -match '(?i)_Email$') { $name = $name.Substring(0, $name.Length - 6) }
     elseif ($name -match '(?i)_Calendar$') { $name = $name.Substring(0, $name.Length - 9) }
     elseif ($name -match '(?i)_Contacts$') { $name = $name.Substring(0, $name.Length - 9) }
+    elseif ($name -match '(?i)_Dashboard$') { $name = $name.Substring(0, $name.Length - 10) }
     return $name
 }
 
@@ -45,6 +46,13 @@ function Get-ReportOutputPaths {
         CalendarPath = $calendarPath
         ContactsPath = $contactsPath
     }
+}
+
+function Get-DashboardOutputPath {
+    param([Parameter(Mandatory = $true)][string]$DisplayPath)
+    $dir = [IO.Path]::GetDirectoryName($DisplayPath)
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
+    return (Join-Path $dir ((Get-ReportPathBaseName -FilePath $DisplayPath) + '_Dashboard.html'))
 }
 
 function Get-WritePathsFromResultFields {

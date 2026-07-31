@@ -99,6 +99,9 @@ $script:Stats = [ordered]@{
 $script:LogWriter = $null
 $script:LogWriters = @()
 
+$script:DashboardOutputPath = $null
+$script:EmailLaunchHelperPath = $null
+
 function ConvertTo-NormalizedInputPath {
     param([AllowNull()][string]$Path)
 
@@ -512,6 +515,7 @@ function Get-ReportPathBaseName {
     elseif ($name -match '(?i)_Email$') { $name = $name.Substring(0, $name.Length - 6) }
     elseif ($name -match '(?i)_Calendar$') { $name = $name.Substring(0, $name.Length - 9) }
     elseif ($name -match '(?i)_Contacts$') { $name = $name.Substring(0, $name.Length - 9) }
+    elseif ($name -match '(?i)_Dashboard$') { $name = $name.Substring(0, $name.Length - 10) }
     return $name
 }
 
@@ -550,6 +554,14 @@ function Get-ReportOutputPaths {
         CalendarPath = $calendarPath
         ContactsPath = $contactsPath
     }
+}
+
+# ponytail: keep in sync with ReportPathNaming.ps1
+function Get-DashboardOutputPath {
+    param([Parameter(Mandatory = $true)][string]$DisplayPath)
+    $dir = [IO.Path]::GetDirectoryName($DisplayPath)
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
+    return (Join-Path $dir ((Get-ReportPathBaseName -FilePath $DisplayPath) + '_Dashboard.html'))
 }
 
 # ponytail: keep in sync with ReportClassification.ps1
@@ -3473,6 +3485,178 @@ function Write-ContactsHtmlReport {
     }
 }
 
+function Get-DashboardReportCss {
+    return (Get-StaticRecordReportCss) + @'
+.dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+.dashboard-card { display: flex; flex-direction: column; padding: 16px 18px 18px; background: #fff; border: 1px solid #d4dce6; border-radius: 16px; box-shadow: 0 10px 30px rgba(26, 35, 50, .08); }
+.dashboard-card h2 { margin: 0 0 4px; font-size: 1.15rem; color: #1a2332; }
+.dashboard-description { margin: 0 0 12px; color: #5c6b7a; font-size: .82rem; }
+.dashboard-facts { margin: 0 0 14px; }
+.dashboard-facts > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-bottom: 1px solid #eef2f6; font-size: .8rem; }
+.dashboard-facts > div:last-child { border-bottom: 0; }
+.dashboard-facts dt { color: #5c6b7a; font-weight: 500; }
+.dashboard-facts dd { margin: 0; color: #1a2332; overflow-wrap: anywhere; }
+.dashboard-open { display: block; margin-top: auto; padding: 9px 14px; border-radius: 8px; background: #0d6e6e; color: #fff; font-size: .85rem; font-weight: 600; text-align: center; text-decoration: none; }
+.dashboard-open:hover { background: #0a5757; }
+.dashboard-note { margin: 0 0 12px; color: #5c6b7a; font-size: .74rem; }
+.dashboard-footer { margin: 18px 2px 8px; color: #5c6b7a; font-size: .78rem; }
+'@
+}
+
+function Get-DashboardReportEntries {
+    # Describes only the reports this run actually produced, in review order.
+    $entries = New-Object System.Collections.Generic.List[object]
+    $definitions = @(
+        [pscustomobject]@{
+            Key = 'teams'; Name = 'Teams'; OutputPath = $script:TeamsOutputPath; LogPath = $script:TeamsLogPath
+            ItemCount = $script:Stats.TeamsItemsExported
+            Description = 'Chat and channel messages grouped into conversations.'
+            LinkPath = $script:TeamsOutputPath
+            Note = 'Opens in your default browser.'
+        },
+        [pscustomobject]@{
+            Key = 'email'; Name = 'Email'; OutputPath = $script:EmailOutputPath; LogPath = $script:EmailLogPath
+            ItemCount = $script:Stats.EmailItemsExported
+            Description = 'Searchable message database for Email Review Viewer.'
+            LinkPath = $script:EmailLaunchHelperPath
+            Note = 'Starts Email Review Viewer. If the browser blocks the file, run Open-EmailReport.cmd from the output folder.'
+        },
+        [pscustomobject]@{
+            Key = 'calendar'; Name = 'Calendar'; OutputPath = $script:CalendarOutputPath; LogPath = $script:CalendarLogPath
+            ItemCount = $script:Stats.CalendarItemsExported
+            Description = 'Month grid, chronological agenda, and appointment details.'
+            LinkPath = $script:CalendarOutputPath
+            Note = 'Opens in your default browser.'
+        },
+        [pscustomobject]@{
+            Key = 'contacts'; Name = 'Contacts'; OutputPath = $script:ContactsOutputPath; LogPath = $script:ContactsLogPath
+            ItemCount = $script:Stats.ContactsItemsExported
+            Description = 'Contacts and distribution lists with folder and category filters.'
+            LinkPath = $script:ContactsOutputPath
+            Note = 'Opens in your default browser.'
+        }
+    )
+    foreach ($definition in $definitions) {
+        if ([string]::IsNullOrWhiteSpace([string]$definition.OutputPath)) { continue }
+        [void]$entries.Add($definition)
+    }
+    return $entries.ToArray()
+}
+
+function ConvertTo-DashboardHref {
+    # Dashboard links are siblings of the dashboard file, so only the file name is needed.
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    return [Uri]::EscapeDataString([IO.Path]::GetFileName($Path))
+}
+
+function Write-EmailReportLaunchHelper {
+    param(
+        [Parameter(Mandatory = $true)][string]$DatabasePath,
+        [Parameter(Mandatory = $true)][string]$HelperPath
+    )
+
+    # A browser cannot start the viewer, so the dashboard links to this helper instead. The viewer
+    # location is resolved at generation time because the output folder has no path back to it.
+    $viewerPath = ''
+    try { $viewerPath = Resolve-EmailViewerExecutable }
+    catch { Write-ReportLog "Email Review Viewer was not found while writing the launch helper. $($_.Exception.Message)" 'WARN' }
+
+    $lines = @(
+        '@echo off',
+        'setlocal',
+        ('set "DB=%~dp0' + [IO.Path]::GetFileName($DatabasePath) + '"'),
+        'set "VIEWER=%PURVIEW_EMAIL_VIEWER_PATH%"',
+        ('if not defined VIEWER set "VIEWER=' + $viewerPath + '"'),
+        'if not exist "%DB%" goto :nodatabase',
+        'if not exist "%VIEWER%" goto :noviewer',
+        'start "" "%VIEWER%" "%DB%"',
+        'exit /b 0',
+        ':nodatabase',
+        'echo Email database not found beside this file: %DB%',
+        'pause',
+        'exit /b 1',
+        ':noviewer',
+        'echo Email Review Viewer was not found: %VIEWER%',
+        'echo Keep EmailReviewViewer.App.exe with the converter, or set PURVIEW_EMAIL_VIEWER_PATH to it.',
+        'pause',
+        'exit /b 1'
+    )
+    [IO.File]::WriteAllLines($HelperPath, $lines, [Text.UTF8Encoding]::new($false))
+}
+
+function Write-DashboardHtmlReport {
+    param(
+        [Parameter(Mandatory = $true)]$PstItem,
+        [Parameter(Mandatory = $true)][string]$ReportPath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Entries
+    )
+
+    $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
+    $css = Get-DashboardReportCss
+    $cards = foreach ($entry in @($Entries)) {
+        $href = ConvertTo-DashboardHref -Path $entry.LinkPath
+        $logName = if ([string]::IsNullOrWhiteSpace([string]$entry.LogPath)) { '' } else { [IO.Path]::GetFileName($entry.LogPath) }
+        @"
+    <article class='dashboard-card' data-report='$(ConvertTo-HtmlEncodedText $entry.Key)' data-item-count='$(ConvertTo-HtmlEncodedText $entry.ItemCount)'>
+      <h2>$(ConvertTo-HtmlEncodedText $entry.Name)</h2>
+      <p class='dashboard-description'>$(ConvertTo-HtmlEncodedText $entry.Description)</p>
+      <dl class='dashboard-facts'>
+        <div><dt>Items</dt><dd>$(ConvertTo-HtmlEncodedText $entry.ItemCount)</dd></div>
+        <div><dt>File</dt><dd>$(ConvertTo-HtmlEncodedText ([IO.Path]::GetFileName($entry.OutputPath)))</dd></div>
+        <div><dt>Log</dt><dd>$(Get-RecordValueHtml $logName)</dd></div>
+      </dl>
+      <p class='dashboard-note'>$(ConvertTo-HtmlEncodedText $entry.Note)</p>
+      <a class='dashboard-open' href='$(ConvertTo-HtmlEncodedText $href)'>Open $(ConvertTo-HtmlEncodedText $entry.Name) report</a>
+    </article>
+"@
+    }
+
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
+    try {
+        $writer.WriteLine(@"
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Purview Conversion Dashboard - $(ConvertTo-HtmlEncodedText $PstItem.Name)</title>
+<style>
+$css
+</style>
+</head>
+<body>
+<div class='page'>
+  <header class='hero'>
+    <h1>Purview Conversion Dashboard</h1>
+    <p>Every report produced by this conversion, with a link to open each one.</p>
+    <div class='hero-credit'>By Patrick Bush</div>
+  </header>
+
+  <section class='summary-grid' aria-label='Run summary'>
+    <div class='summary-card'><div class='label'>PST</div><div class='value'>$(ConvertTo-HtmlEncodedText $PstItem.Name)</div></div>
+    <div class='summary-card'><div class='label'>Generated</div><div class='value'>$(ConvertTo-HtmlEncodedText $generated)</div></div>
+    <div class='summary-card'><div class='label'>Items exported</div><div class='value'>$(ConvertTo-HtmlEncodedText $script:Stats.ItemsExported)</div></div>
+    <div class='summary-card'><div class='label'>Folders scanned</div><div class='value'>$(ConvertTo-HtmlEncodedText $script:Stats.FoldersScanned)</div></div>
+    <div class='summary-card'><div class='label'>Read warnings</div><div class='value'>Items: $(ConvertTo-HtmlEncodedText $script:Stats.ItemReadFailures); Attachments: $(ConvertTo-HtmlEncodedText $script:Stats.AttachmentReadFailures)</div></div>
+  </section>
+
+  <section class='dashboard-grid' aria-label='Generated reports'>
+$($cards -join "`n")
+  </section>
+
+  <p class='dashboard-footer'>Every report listed here lives in the same folder as this page. Keep them together when sharing or archiving the conversion.</p>
+</div>
+</body>
+</html>
+"@)
+    }
+    finally {
+        $writer.Dispose()
+    }
+}
+
 function Resolve-EmailViewerExecutable {
     $candidates = @(
         $env:PURVIEW_EMAIL_VIEWER_PATH,
@@ -3598,6 +3782,11 @@ function Invoke-ReportConversion {
     $script:EmailLogPath = $logPaths.EmailPath
     $script:CalendarLogPath = $logPaths.CalendarPath
     $script:ContactsLogPath = $logPaths.ContactsPath
+    $script:DashboardOutputPath = Get-DashboardOutputPath -DisplayPath $displayHtmlPath
+    $script:EmailLaunchHelperPath = if ($EmailReport) {
+        Join-Path ([IO.Path]::GetDirectoryName($script:DashboardOutputPath)) 'Open-EmailReport.cmd'
+    }
+    else { $null }
     $script:OutputPath = @(
         $script:TeamsOutputPath,
         $script:EmailOutputPath,
@@ -3615,8 +3804,9 @@ function Invoke-ReportConversion {
     if ($script:EmailOutputPath) { Assert-OutputPathsSafe -ReportPath $script:EmailOutputPath -LogPath $script:EmailLogPath }
     if ($script:CalendarOutputPath) { Assert-OutputPathsSafe -ReportPath $script:CalendarOutputPath -LogPath $script:CalendarLogPath }
     if ($script:ContactsOutputPath) { Assert-OutputPathsSafe -ReportPath $script:ContactsOutputPath -LogPath $script:ContactsLogPath }
+    Assert-OutputPathsSafe -ReportPath $script:DashboardOutputPath -LogPath $script:LogPath
 
-    foreach ($pathToPrepare in @($script:TeamsOutputPath, $script:EmailOutputPath, $script:CalendarOutputPath, $script:ContactsOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:CalendarLogPath, $script:ContactsLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
+    foreach ($pathToPrepare in @($script:TeamsOutputPath, $script:EmailOutputPath, $script:CalendarOutputPath, $script:ContactsOutputPath, $script:DashboardOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:CalendarLogPath, $script:ContactsLogPath) | Where-Object { $_ } | Sort-Object -Unique) {
         $outDir = Split-Path -LiteralPath $pathToPrepare
         if ([string]::IsNullOrWhiteSpace($outDir)) { $outDir = $downloads }
         # New-Item has no -LiteralPath, and -Path treats [ ] as wildcards; use the .NET API so a
@@ -3747,8 +3937,15 @@ function Invoke-ReportConversion {
             Write-ContactsHtmlReport -Records $contactsRecords.ToArray() -PstItem $pstItem -ReportPath $script:ContactsOutputPath -LogPath $script:ContactsLogPath
             Write-ReportLog "Contacts HTML report written to $script:ContactsOutputPath"
         }
+        if ($EmailReport) {
+            Write-EmailReportLaunchHelper -DatabasePath $script:EmailOutputPath -HelperPath $script:EmailLaunchHelperPath
+            Write-ReportLog "Email launch helper written to $script:EmailLaunchHelperPath"
+        }
+        Write-ReportLog 'Writing conversion dashboard.'
+        Write-DashboardHtmlReport -PstItem $pstItem -ReportPath $script:DashboardOutputPath -Entries (Get-DashboardReportEntries)
+        Write-ReportLog "Conversion dashboard written to $script:DashboardOutputPath"
         Write-ConversionStage -Stage 'ReportWritten'
-        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}|TeamsOutputPath={7}|EmailOutputPath={8}|CalendarOutputPath={9}|ContactsOutputPath={10}|TeamsLogPath={11}|EmailLogPath={12}|CalendarLogPath={13}|ContactsLogPath={14}|TeamsItemsExported={15}|EmailItemsExported={16}|CalendarItemsExported={17}|ContactsItemsExported={18}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $script:TeamsOutputPath, $script:EmailOutputPath, $script:CalendarOutputPath, $script:ContactsOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:CalendarLogPath, $script:ContactsLogPath, $script:Stats.TeamsItemsExported, $script:Stats.EmailItemsExported, $script:Stats.CalendarItemsExported, $script:Stats.ContactsItemsExported)
+        Write-Output ("CONVERSION_RESULT|{0}OutputPath={1}|LogPath={2}|ItemsExported={3}|ItemReadFailures={4}|AttachmentReadFailures={5}|SubfolderScanFailures={6}|TeamsOutputPath={7}|EmailOutputPath={8}|CalendarOutputPath={9}|ContactsOutputPath={10}|TeamsLogPath={11}|EmailLogPath={12}|CalendarLogPath={13}|ContactsLogPath={14}|TeamsItemsExported={15}|EmailItemsExported={16}|CalendarItemsExported={17}|ContactsItemsExported={18}|DashboardOutputPath={19}" -f (Get-RunIdField), $script:OutputPath, $script:LogPath, $script:Stats.ItemsExported, $script:Stats.ItemReadFailures, $script:Stats.AttachmentReadFailures, $script:Stats.SubfolderScanFailures, $script:TeamsOutputPath, $script:EmailOutputPath, $script:CalendarOutputPath, $script:ContactsOutputPath, $script:TeamsLogPath, $script:EmailLogPath, $script:CalendarLogPath, $script:ContactsLogPath, $script:Stats.TeamsItemsExported, $script:Stats.EmailItemsExported, $script:Stats.CalendarItemsExported, $script:Stats.ContactsItemsExported, $script:DashboardOutputPath)
     }
     catch {
         $fatalMessage = if ($_.Exception.Message) { $_.Exception.Message } else { [string]$_.Exception }

@@ -48,7 +48,10 @@ Assert-SourceContains -Path $core -Snippet 'function Get-ReportOutputPaths' -Lab
 Assert-SourceContains -Path $core -Snippet 'function Get-ItemReportBucket' -Label 'core helper Get-ItemReportBucket'
 Assert-SourceContains -Path $core -Snippet 'function Write-CalendarHtmlReport' -Label 'core writer Write-CalendarHtmlReport'
 Assert-SourceContains -Path $core -Snippet 'function Write-ContactsHtmlReport' -Label 'core writer Write-ContactsHtmlReport'
+Assert-SourceContains -Path $core -Snippet 'function Write-DashboardHtmlReport' -Label 'core writer Write-DashboardHtmlReport'
+Assert-SourceContains -Path $core -Snippet 'function Write-EmailReportLaunchHelper' -Label 'core writer Write-EmailReportLaunchHelper'
 Assert-SourceContains -Path $launcher -Snippet 'function Get-ReportOutputPaths' -Label 'launcher helper Get-ReportOutputPaths'
+Assert-SourceContains -Path $launcher -Snippet 'function Get-DashboardOutputPath' -Label 'launcher helper Get-DashboardOutputPath'
 [void][IO.Directory]::CreateDirectory($buildDir)
 
 # --- Embed core ---
