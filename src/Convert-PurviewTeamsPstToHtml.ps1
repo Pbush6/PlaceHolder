@@ -3607,7 +3607,7 @@ function Write-DashboardHtmlReport {
         <div><dt>Log</dt><dd>$(Get-RecordValueHtml $logName)</dd></div>
       </dl>
       <p class='dashboard-note'>$(ConvertTo-HtmlEncodedText $entry.Note)</p>
-      <a class='dashboard-open' href='$(ConvertTo-HtmlEncodedText $href)'>Open $(ConvertTo-HtmlEncodedText $entry.Name) report</a>
+      <a class='dashboard-open' href='$(ConvertTo-HtmlEncodedText $href)' target='_blank' rel='noopener'>Open $(ConvertTo-HtmlEncodedText $entry.Name) report</a>
     </article>
 "@
     }

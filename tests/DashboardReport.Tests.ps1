@@ -112,6 +112,8 @@ Describe 'Conversion dashboard report' {
         $dashboardHtml | Should -Match 'Open-EmailReport\.cmd'
         $dashboardHtml | Should -Match 'dashboard-all_Email\.db'
         $dashboardHtml | Should -Match "class='dashboard-open'"
+        ([regex]::Matches($dashboardHtml, "class='dashboard-open'[^>]*target='_blank'")).Count |
+            Should -Be 4 -Because 'reports open in a new tab so the dashboard stays available'
 
         $helperText = Get-Content -LiteralPath $helperPath -Raw
         $helperText | Should -Match 'dashboard-all_Email\.db'
