@@ -116,6 +116,14 @@ Describe 'Conversion dashboard report' {
         ([regex]::Matches($dashboardHtml, "class='dashboard-open'[^>]*target='_blank'")).Count |
             Should -Be 4 -Because 'reports open in a new tab so the dashboard stays available'
 
+        $dashboardHtml | Should -Match '<dt>Total messages</dt><dd>2</dd>'
+        $dashboardHtml | Should -Match '<dt>Total emails</dt><dd>2</dd>'
+        $dashboardHtml | Should -Match '<dt>Total appointments</dt><dd>1</dd>'
+        $dashboardHtml | Should -Match '<dt>Total contacts</dt><dd>1</dd>'
+        $dashboardHtml | Should -Match '\.dashboard-grid \{[^}]*grid-template-columns: repeat\(2,' -Because 'the four report cards sit in quadrants'
+        $dashboardHtml | Should -Not -Match '<dt>Log</dt>'
+        $dashboardHtml | Should -Not -Match 'dashboard-all_Teams\.log'
+
         $helperText = Get-Content -LiteralPath $helperPath -Raw
         $helperText | Should -Match 'dashboard-all_Email\.db'
         $helperText | Should -Match 'EmailReviewViewer\.App\.exe'
@@ -144,11 +152,12 @@ Describe 'Conversion dashboard report' {
         (Test-Path -LiteralPath $dashboardPath -PathType Leaf) | Should -BeTrue
         (Test-Path -LiteralPath $helperPath -PathType Leaf) | Should -BeFalse
 
+        # Match the card element, not the per-report style rules that are always in the stylesheet.
         $dashboardHtml = Get-Content -LiteralPath $dashboardPath -Raw
-        $dashboardHtml | Should -Match "data-report='calendar'"
-        $dashboardHtml | Should -Not -Match "data-report='teams'"
-        $dashboardHtml | Should -Not -Match "data-report='email'"
-        $dashboardHtml | Should -Not -Match "data-report='contacts'"
+        $dashboardHtml | Should -Match "<article class='dashboard-card' data-report='calendar'"
+        $dashboardHtml | Should -Not -Match "<article class='dashboard-card' data-report='teams'"
+        $dashboardHtml | Should -Not -Match "<article class='dashboard-card' data-report='email'"
+        $dashboardHtml | Should -Not -Match "<article class='dashboard-card' data-report='contacts'"
     }
 
     It 'reports exported counts and read warnings from run statistics' {
@@ -164,6 +173,7 @@ Describe 'Conversion dashboard report' {
         $html = Get-Content -LiteralPath $dashboardPath -Raw
         $html | Should -Match "data-report='teams'"
         $html | Should -Match 'data-item-count=.2.'
+        $html | Should -Match '<dt>Total messages</dt><dd>2</dd>'
         $html | Should -Match 'Items: 4'
         $html | Should -Match 'Attachments: 7'
     }

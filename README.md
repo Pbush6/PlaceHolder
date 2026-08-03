@@ -139,9 +139,10 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 
 ## Recent changes (2026-07-31, experimental)
 
-- Every conversion writes `Base_Dashboard.html`, a landing page with one summary card per report produced and a link to open each one.
+- Every conversion writes `Base_Dashboard.html`, a landing page with one summary card per report produced and a link to open each one. The four cards sit two per row, each with its own accent color and icon, and each leads with the total for that report (messages, emails, appointments, or contacts) above the file name. Summary tiles across the top give items exported, reports produced, read warnings, and when the conversion ran, with the warning tile turning amber when there is anything to look at.
 - The GUI opens only the dashboard after a successful conversion and no longer has report checkboxes; all four reports always run. CLI report flags are unchanged.
 - Email opens from the dashboard through a per-user `purview-email:` protocol handler that starts Email Review Viewer; `Open-EmailReport.cmd` stays as a fallback. Report links open in a new tab.
+- The dashboard was restyled as a landing page with its own self-contained stylesheet: a deep header band, summary tiles, color-coded report cards with icons, and large headline counts. It still loads nothing from the internet.
 - `CONVERSION_RESULT` gained a trailing `DashboardOutputPath` field.
 
 ## Earlier changes (2026-07-30)

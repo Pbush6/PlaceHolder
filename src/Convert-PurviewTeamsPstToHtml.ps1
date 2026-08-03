@@ -3487,21 +3487,99 @@ function Write-ContactsHtmlReport {
 }
 
 function Get-DashboardReportCss {
-    return (Get-StaticRecordReportCss) + @'
-.dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
-.dashboard-card { display: flex; flex-direction: column; padding: 16px 18px 18px; background: #fff; border: 1px solid #d4dce6; border-radius: 16px; box-shadow: 0 10px 30px rgba(26, 35, 50, .08); }
-.dashboard-card h2 { margin: 0 0 4px; font-size: 1.15rem; color: #1a2332; }
-.dashboard-description { margin: 0 0 12px; color: #5c6b7a; font-size: .82rem; }
-.dashboard-facts { margin: 0 0 14px; }
-.dashboard-facts > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-bottom: 1px solid #eef2f6; font-size: .8rem; }
-.dashboard-facts > div:last-child { border-bottom: 0; }
-.dashboard-facts dt { color: #5c6b7a; font-weight: 500; }
-.dashboard-facts dd { margin: 0; color: #1a2332; overflow-wrap: anywhere; }
-.dashboard-open { display: block; margin-top: auto; padding: 9px 14px; border-radius: 8px; background: #0d6e6e; color: #fff; font-size: .85rem; font-weight: 600; text-align: center; text-decoration: none; }
-.dashboard-open:hover { background: #0a5757; }
-.dashboard-note { margin: 0 0 12px; color: #5c6b7a; font-size: .74rem; }
-.dashboard-footer { margin: 18px 2px 8px; color: #5c6b7a; font-size: .78rem; }
+    # The dashboard is a landing page rather than a review surface, so it carries its own
+    # stylesheet instead of inheriting the dense report CSS.
+    return @'
+:root {
+  --ink: #0d1b2a;
+  --ink-soft: #57667d;
+  --line: #dde4ee;
+  --hairline: #eef1f7;
+  --surface: #ffffff;
+  --accent: #334155;
+  --accent-soft: #eef1f6;
+  --accent-line: #dbe2ec;
+  --warn: #b45309;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background-color: #eef1f7;
+  background-image: radial-gradient(1100px 460px at 10% -10%, #dde6f6 0%, rgba(221, 230, 246, 0) 62%), radial-gradient(900px 420px at 100% -4%, #d9ebe7 0%, rgba(217, 235, 231, 0) 58%);
+  background-repeat: no-repeat;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.dashboard-page { max-width: 1120px; margin: 0 auto; padding: 32px 22px 44px; }
+.dashboard-hero { position: relative; overflow: hidden; padding: 30px 34px 30px; border-radius: 22px; color: #eaf2f6; background-color: #0b2239; background-image: linear-gradient(122deg, #0b2239 0%, #113a52 48%, #0f5b58 100%); box-shadow: 0 24px 50px rgba(9, 25, 40, .26); }
+.dashboard-hero::after { content: ''; position: absolute; inset: 0; background-image: linear-gradient(rgba(255, 255, 255, .05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, .05) 1px, transparent 1px); background-size: 46px 46px; pointer-events: none; }
+.dashboard-hero > * { position: relative; }
+.dashboard-eyebrow { margin: 0 0 8px; font-size: .7rem; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: #7fd1cb; }
+.dashboard-hero h1 { margin: 0 0 10px; font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Cambria, Georgia, serif; font-size: clamp(1.75rem, 1.25rem + 1.7vw, 2.5rem); font-weight: 600; line-height: 1.1; letter-spacing: -.015em; }
+.dashboard-hero p { margin: 0; max-width: 60ch; color: rgba(234, 242, 246, .76); font-size: .95rem; }
+.dashboard-source { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-top: 18px; padding: 8px 16px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 999px; background: rgba(255, 255, 255, .09); }
+.dashboard-source span { font-size: .64rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: rgba(234, 242, 246, .62); }
+.dashboard-source strong { font-size: .92rem; font-weight: 600; overflow-wrap: anywhere; }
+.dashboard-credit { position: absolute; right: 26px; bottom: 18px; font-size: .7rem; color: rgba(234, 242, 246, .48); }
+.dashboard-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 16px; }
+.dashboard-stat { padding: 14px 17px 15px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 16px rgba(13, 27, 42, .05); }
+.dashboard-stat .label { font-size: .66rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-soft); }
+.dashboard-stat .value { margin-top: 5px; font-size: 1.6rem; font-weight: 700; line-height: 1.1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dashboard-stat .detail { margin-top: 3px; font-size: .74rem; color: var(--ink-soft); overflow-wrap: anywhere; }
+.dashboard-stat.is-text .value { font-size: .98rem; font-weight: 600; letter-spacing: 0; }
+.dashboard-stat.dashboard-stat-warn { border-color: #f0d7ae; background: #fffbf4; }
+.dashboard-stat.dashboard-stat-warn .value { color: var(--warn); }
+.dashboard-section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px; margin: 30px 3px 12px; }
+.dashboard-section-head h2 { margin: 0; font-size: .78rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-soft); }
+.dashboard-section-head span { font-size: .78rem; color: var(--ink-soft); }
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 780px) { .dashboard-grid { grid-template-columns: 1fr; } .dashboard-page { padding: 20px 14px 32px; } .dashboard-hero { padding: 24px 22px; } .dashboard-credit { position: static; display: block; margin-top: 14px; } }
+.dashboard-card { position: relative; display: flex; flex-direction: column; overflow: hidden; padding: 24px 24px 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 16px 36px rgba(13, 27, 42, .09); transition: transform .16s ease, box-shadow .16s ease; }
+.dashboard-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--accent); }
+.dashboard-card:hover { transform: translateY(-2px); box-shadow: 0 22px 46px rgba(13, 27, 42, .14); }
+.dashboard-card[data-report='teams'] { --accent: #4338ca; --accent-soft: #eef0fe; --accent-line: #dbdefb; }
+.dashboard-card[data-report='email'] { --accent: #0f766e; --accent-soft: #e6f5f2; --accent-line: #c9e7e1; }
+.dashboard-card[data-report='calendar'] { --accent: #b45309; --accent-soft: #fdf4e7; --accent-line: #f5e1c3; }
+.dashboard-card[data-report='contacts'] { --accent: #9d174d; --accent-soft: #fdeaf1; --accent-line: #f7d2df; }
+.dashboard-card-head { display: flex; align-items: center; gap: 13px; margin-bottom: 10px; }
+.dashboard-icon { display: flex; align-items: center; justify-content: center; flex: none; width: 42px; height: 42px; border: 1px solid var(--accent-line); border-radius: 13px; background: var(--accent-soft); color: var(--accent); }
+.dashboard-icon svg { width: 21px; height: 21px; }
+.dashboard-card h2 { margin: 0; font-size: 1.2rem; font-weight: 700; letter-spacing: -.01em; }
+.dashboard-description { margin: 0 0 18px; color: var(--ink-soft); font-size: .85rem; }
+.dashboard-facts { margin: 0 0 16px; }
+.dashboard-facts > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 8px 0; border-top: 1px solid var(--hairline); font-size: .84rem; }
+.dashboard-facts dt { color: var(--ink-soft); }
+.dashboard-facts dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dashboard-facts > .dashboard-metric { display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 2px; padding: 0 0 14px; border-top: 0; }
+.dashboard-metric dt { font-size: .68rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.dashboard-metric dd { font-size: 2.5rem; font-weight: 700; line-height: 1; letter-spacing: -.03em; color: var(--accent); }
+.dashboard-file dd { font-family: Consolas, 'Cascadia Mono', 'SF Mono', 'Liberation Mono', monospace; font-size: .76rem; font-weight: 500; color: var(--ink-soft); }
+.dashboard-note { margin: 0 0 18px; color: var(--ink-soft); font-size: .76rem; line-height: 1.45; }
+.dashboard-open { display: inline-flex; align-items: center; gap: 9px; align-self: flex-start; margin-top: auto; padding: 11px 20px; border-radius: 11px; background: var(--accent); color: #fff; font-size: .87rem; font-weight: 600; text-decoration: none; box-shadow: 0 10px 20px rgba(13, 27, 42, .16); }
+.dashboard-open svg { width: 15px; height: 15px; }
+.dashboard-open:hover { filter: brightness(1.1); }
+.dashboard-open:focus-visible { outline: 3px solid #0b2239; outline-offset: 3px; }
+.dashboard-footer { margin: 28px 3px 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: .78rem; }
+@media (prefers-reduced-motion: reduce) { .dashboard-card { transition: none; } .dashboard-card:hover { transform: none; } }
+@media print { body { background: #fff; } .dashboard-hero { box-shadow: none; } .dashboard-card { break-inside: avoid; box-shadow: none; } }
 '@
+}
+
+function Get-DashboardReportIcon {
+    # One line-art icon family, drawn inline so the dashboard stays a single portable file.
+    param([AllowNull()][string]$Key)
+
+    $shapes = switch ($Key) {
+        'teams'    { "<path d='M20 12a6.5 6.5 0 0 1-6.5 6.5H8.6L4.5 21.5v-3.8A6.5 6.5 0 0 1 8.6 5.5h4.9A6.5 6.5 0 0 1 20 12z'/><path d='M8.8 10.5h6.4M8.8 14h4.2'/>" }
+        'email'    { "<rect x='3' y='5' width='18' height='14' rx='2.5'/><path d='m3.9 7.3 6.9 4.8a2.1 2.1 0 0 0 2.4 0l6.9-4.8'/>" }
+        'calendar' { "<rect x='3' y='5' width='18' height='16' rx='2.5'/><path d='M8 3v4M16 3v4M3 10.5h18'/><path d='M7.5 14h3.2v3.2H7.5z'/>" }
+        'contacts' { "<rect x='3' y='4.5' width='18' height='15' rx='2.5'/><path d='M12.2 11.6a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z'/><path d='M8.3 17.2a4.1 4.1 0 0 1 7.8 0'/>" }
+        default    { "<path d='M6.5 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 20V4.5A1.5 1.5 0 0 1 6.5 3z'/><path d='M13 3v5h5'/>" }
+    }
+    return "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true' focusable='false'>$shapes</svg>"
 }
 
 function Get-DashboardReportEntries {
@@ -3509,29 +3587,33 @@ function Get-DashboardReportEntries {
     $entries = New-Object System.Collections.Generic.List[object]
     $definitions = @(
         [pscustomobject]@{
-            Key = 'teams'; Name = 'Teams'; OutputPath = $script:TeamsOutputPath; LogPath = $script:TeamsLogPath
+            Key = 'teams'; Name = 'Teams'; OutputPath = $script:TeamsOutputPath
             ItemCount = $script:Stats.TeamsItemsExported
+            Counts = @([pscustomobject]@{ Label = 'Total messages'; Value = $script:Stats.TeamsItemsExported })
             Description = 'Chat and channel messages grouped into conversations.'
             LinkPath = $script:TeamsOutputPath
             Note = 'Opens in your default browser.'
         },
         [pscustomobject]@{
-            Key = 'email'; Name = 'Email'; OutputPath = $script:EmailOutputPath; LogPath = $script:EmailLogPath
+            Key = 'email'; Name = 'Email'; OutputPath = $script:EmailOutputPath
             ItemCount = $script:Stats.EmailItemsExported
+            Counts = @([pscustomobject]@{ Label = 'Total emails'; Value = $script:Stats.EmailItemsExported })
             Description = 'Searchable message database for Email Review Viewer.'
             LinkPath = if ($script:EmailReportUrl) { $script:EmailReportUrl } else { $script:EmailLaunchHelperPath }
             Note = 'Starts Email Review Viewer; your browser asks for permission the first time. If it is blocked, run Open-EmailReport.cmd from the output folder.'
         },
         [pscustomobject]@{
-            Key = 'calendar'; Name = 'Calendar'; OutputPath = $script:CalendarOutputPath; LogPath = $script:CalendarLogPath
+            Key = 'calendar'; Name = 'Calendar'; OutputPath = $script:CalendarOutputPath
             ItemCount = $script:Stats.CalendarItemsExported
+            Counts = @([pscustomobject]@{ Label = 'Total appointments'; Value = $script:Stats.CalendarItemsExported })
             Description = 'Month grid, chronological agenda, and appointment details.'
             LinkPath = $script:CalendarOutputPath
             Note = 'Opens in your default browser.'
         },
         [pscustomobject]@{
-            Key = 'contacts'; Name = 'Contacts'; OutputPath = $script:ContactsOutputPath; LogPath = $script:ContactsLogPath
+            Key = 'contacts'; Name = 'Contacts'; OutputPath = $script:ContactsOutputPath
             ItemCount = $script:Stats.ContactsItemsExported
+            Counts = @([pscustomobject]@{ Label = 'Total contacts'; Value = $script:Stats.ContactsItemsExported })
             Description = 'Contacts and distribution lists with folder and category filters.'
             LinkPath = $script:ContactsOutputPath
             Note = 'Opens in your default browser.'
@@ -3542,6 +3624,14 @@ function Get-DashboardReportEntries {
         [void]$entries.Add($definition)
     }
     return $entries.ToArray()
+}
+
+function Format-DashboardNumber {
+    # Grouped digits keep five-figure export counts readable at a glance.
+    param([AllowNull()]$Value)
+    $number = 0
+    if ([int]::TryParse([string]$Value, [ref]$number)) { return ('{0:N0}' -f $number) }
+    return [string]$Value
 }
 
 function ConvertTo-DashboardHref {
@@ -3617,21 +3707,31 @@ function Write-DashboardHtmlReport {
     )
 
     $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
+    $warningTotal = [int]$script:Stats.ItemReadFailures + [int]$script:Stats.AttachmentReadFailures
+    $warningClass = if ($warningTotal -gt 0) { ' dashboard-stat-warn' } else { '' }
     $css = Get-DashboardReportCss
+    $openIcon = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true' focusable='false'><path d='M7 17 17 7'/><path d='M9 7h8v8'/></svg>"
     $cards = foreach ($entry in @($Entries)) {
         $href = ConvertTo-DashboardHref -Path $entry.LinkPath
-        $logName = if ([string]::IsNullOrWhiteSpace([string]$entry.LogPath)) { '' } else { [IO.Path]::GetFileName($entry.LogPath) }
+        # The first count is the headline number for the report; the rest are supporting rows.
+        $countRows = @(for ($index = 0; $index -lt @($entry.Counts).Count; $index++) {
+            $count = @($entry.Counts)[$index]
+            $rowClass = if ($index -eq 0) { " class='dashboard-metric'" } else { '' }
+            "        <div$rowClass><dt>$(ConvertTo-HtmlEncodedText $count.Label)</dt><dd>$(ConvertTo-HtmlEncodedText (Format-DashboardNumber $count.Value))</dd></div>"
+        }) -join "`n"
         @"
     <article class='dashboard-card' data-report='$(ConvertTo-HtmlEncodedText $entry.Key)' data-item-count='$(ConvertTo-HtmlEncodedText $entry.ItemCount)'>
-      <h2>$(ConvertTo-HtmlEncodedText $entry.Name)</h2>
+      <div class='dashboard-card-head'>
+        <span class='dashboard-icon'>$(Get-DashboardReportIcon -Key $entry.Key)</span>
+        <h2>$(ConvertTo-HtmlEncodedText $entry.Name)</h2>
+      </div>
       <p class='dashboard-description'>$(ConvertTo-HtmlEncodedText $entry.Description)</p>
       <dl class='dashboard-facts'>
-        <div><dt>Items</dt><dd>$(ConvertTo-HtmlEncodedText $entry.ItemCount)</dd></div>
-        <div><dt>File</dt><dd>$(ConvertTo-HtmlEncodedText ([IO.Path]::GetFileName($entry.OutputPath)))</dd></div>
-        <div><dt>Log</dt><dd>$(Get-RecordValueHtml $logName)</dd></div>
+$countRows
+        <div class='dashboard-file'><dt>File</dt><dd>$(ConvertTo-HtmlEncodedText ([IO.Path]::GetFileName($entry.OutputPath)))</dd></div>
       </dl>
       <p class='dashboard-note'>$(ConvertTo-HtmlEncodedText $entry.Note)</p>
-      <a class='dashboard-open' href='$(ConvertTo-HtmlEncodedText $href)' target='_blank' rel='noopener'>Open $(ConvertTo-HtmlEncodedText $entry.Name) report</a>
+      <a class='dashboard-open' href='$(ConvertTo-HtmlEncodedText $href)' target='_blank' rel='noopener'>Open $(ConvertTo-HtmlEncodedText $entry.Name) report$openIcon</a>
     </article>
 "@
     }
@@ -3645,27 +3745,33 @@ function Write-DashboardHtmlReport {
 <head>
 <meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta name='color-scheme' content='light'>
 <title>Purview Conversion Dashboard - $(ConvertTo-HtmlEncodedText $PstItem.Name)</title>
 <style>
 $css
 </style>
 </head>
 <body>
-<div class='page'>
-  <header class='hero'>
-    <h1>Purview Conversion Dashboard</h1>
+<div class='dashboard-page'>
+  <header class='dashboard-hero'>
+    <p class='dashboard-eyebrow'>Microsoft Purview eDiscovery export</p>
+    <h1>Conversion Dashboard</h1>
     <p>Every report produced by this conversion, with a link to open each one.</p>
-    <div class='hero-credit'>By Patrick Bush</div>
+    <div class='dashboard-source'><span>Source PST</span><strong>$(ConvertTo-HtmlEncodedText $PstItem.Name)</strong></div>
+    <div class='dashboard-credit'>By Patrick Bush</div>
   </header>
 
-  <section class='summary-grid' aria-label='Run summary'>
-    <div class='summary-card'><div class='label'>PST</div><div class='value'>$(ConvertTo-HtmlEncodedText $PstItem.Name)</div></div>
-    <div class='summary-card'><div class='label'>Generated</div><div class='value'>$(ConvertTo-HtmlEncodedText $generated)</div></div>
-    <div class='summary-card'><div class='label'>Items exported</div><div class='value'>$(ConvertTo-HtmlEncodedText $script:Stats.ItemsExported)</div></div>
-    <div class='summary-card'><div class='label'>Folders scanned</div><div class='value'>$(ConvertTo-HtmlEncodedText $script:Stats.FoldersScanned)</div></div>
-    <div class='summary-card'><div class='label'>Read warnings</div><div class='value'>Items: $(ConvertTo-HtmlEncodedText $script:Stats.ItemReadFailures); Attachments: $(ConvertTo-HtmlEncodedText $script:Stats.AttachmentReadFailures)</div></div>
+  <section class='dashboard-stats' aria-label='Run summary'>
+    <div class='dashboard-stat'><div class='label'>Items exported</div><div class='value'>$(ConvertTo-HtmlEncodedText (Format-DashboardNumber $script:Stats.ItemsExported))</div><div class='detail'>$(ConvertTo-HtmlEncodedText (Format-DashboardNumber $script:Stats.FoldersScanned)) folders scanned</div></div>
+    <div class='dashboard-stat'><div class='label'>Reports produced</div><div class='value'>$(ConvertTo-HtmlEncodedText @($Entries).Count)</div><div class='detail'>Open any report below</div></div>
+    <div class='dashboard-stat$warningClass'><div class='label'>Read warnings</div><div class='value'>$(ConvertTo-HtmlEncodedText (Format-DashboardNumber $warningTotal))</div><div class='detail'>Items: $(ConvertTo-HtmlEncodedText $script:Stats.ItemReadFailures); Attachments: $(ConvertTo-HtmlEncodedText $script:Stats.AttachmentReadFailures)</div></div>
+    <div class='dashboard-stat is-text'><div class='label'>Generated</div><div class='value'>$(ConvertTo-HtmlEncodedText $generated)</div></div>
   </section>
 
+  <div class='dashboard-section-head'>
+    <h2>Generated reports</h2>
+    <span>Each report opens in a new tab</span>
+  </div>
   <section class='dashboard-grid' aria-label='Generated reports'>
 $($cards -join "`n")
   </section>

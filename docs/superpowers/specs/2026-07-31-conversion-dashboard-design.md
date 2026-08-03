@@ -59,15 +59,24 @@ It receives the PST item, the produced report descriptors, and the run statistic
 
 Page contents:
 
-- Run header: PST name, generated timestamp, total items exported, folders scanned, item and
-  attachment read-warning counts.
-- One card per produced report: report name, exported item count, output file name, log file name,
-  and an Open link.
+- Run header: source PST name, then summary tiles for items exported (with folders scanned),
+  reports produced, read warnings, and the generated timestamp. The warning tile shifts to amber
+  when the item and attachment warnings total above zero, so a clean run reads as calm.
+- One card per produced report, two cards per row: report name with an accent color and inline SVG
+  icon, a headline count labelled for that report's content (total messages, emails, appointments,
+  or contacts), the output file name, and an Open link. Log file names stay out of the cards; they
+  are noise for the reviewer reading the reports.
   - Teams, Calendar, and Contacts link to the sibling HTML file.
-  - Email links to `Open-EmailReport.cmd`.
+  - Email links to the `purview-email:` URL, falling back to `Open-EmailReport.cmd`.
 - Reports that were not produced are omitted rather than shown as empty or failed.
 
 All dynamic values are HTML-encoded with the existing `ConvertTo-HtmlEncodedText` helper.
+
+The dashboard owns its stylesheet instead of extending the report CSS, because it is a landing page
+rather than a dense review surface. It stays a single portable file: no external fonts, scripts, or
+image assets, with icons drawn as inline SVG. Emphasis is carried by size and color rather than more
+chrome — headline counts are set large in the card's accent color, labels are small uppercase, file
+names are muted monospace, and the accent doubles as the card's top rule and button fill.
 
 ### Email launch protocol (core + viewer)
 
