@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Describe 'Release 1.2.1.0 contract' -Tag 'Build', 'Release' {
+Describe 'Release 1.3.0.0 contract' -Tag 'Build', 'Release' {
     BeforeAll {
         $script:repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
         $script:readmePath = Join-Path $script:repoRoot 'README.md'
@@ -13,16 +13,16 @@ Describe 'Release 1.2.1.0 contract' -Tag 'Build', 'Release' {
         $script:contractsPath = Join-Path $script:repoRoot 'docs\DATA_CONTRACTS.md'
     }
 
-    It 'keeps every executable and package version at 1.2.1.0' {
+    It 'keeps every executable and package version at 1.3.0.0' {
         (Get-Content -LiteralPath $script:readmePath -Raw) |
-            Should -Match '(?m)^\*\*Current version:\*\*\s*1\.2\.1\.0\s*$'
+            Should -Match '(?m)^\*\*Current version:\*\*\s*1\.3\.0\.0\s*$'
         (Get-Content -LiteralPath $script:buildPath -Raw) |
-            Should -Match "\[string\]\`$Version\s*=\s*'1\.2\.1\.0'"
+            Should -Match "\[string\]\`$Version\s*=\s*'1\.3\.0\.0'"
 
         [xml]$viewerProject = Get-Content -LiteralPath $script:viewerProjectPath -Raw
-        [string]$viewerProject.Project.PropertyGroup.Version | Should -Be '1.2.1.0'
-        [string]$viewerProject.Project.PropertyGroup.FileVersion | Should -Be '1.2.1.0'
-        [string]$viewerProject.Project.PropertyGroup.AssemblyVersion | Should -Be '1.2.1.0'
+        [string]$viewerProject.Project.PropertyGroup.Version | Should -Be '1.3.0.0'
+        [string]$viewerProject.Project.PropertyGroup.FileVersion | Should -Be '1.3.0.0'
+        [string]$viewerProject.Project.PropertyGroup.AssemblyVersion | Should -Be '1.3.0.0'
 
         $packageText = Get-Content -LiteralPath $script:packagePath -Raw
         $packageText | Should -Match 'PurviewTeamsPstToHtmlApp-\$version-win-x64'
@@ -58,7 +58,7 @@ Describe 'Release 1.2.1.0 contract' -Tag 'Build', 'Release' {
         $packageText | Should -Match 'By Patrick Bush'
     }
 
-    It 'documents the four default reports, typed outputs, filters, launches, and limitations' {
+    It 'documents the four GUI reports, dashboard, typed outputs, filters, launches, and limitations' {
         $readme = Get-Content -LiteralPath $script:readmePath -Raw
         foreach ($requiredText in @(
             'Teams',
@@ -69,7 +69,8 @@ Describe 'Release 1.2.1.0 contract' -Tag 'Build', 'Release' {
             '_Email.db',
             '_Calendar.html',
             '_Contacts.html',
-            'selected by default',
+            '_Dashboard.html',
+            'GUI always generates',
             'search',
             'filter',
             'default browser',

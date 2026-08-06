@@ -160,19 +160,21 @@ QUICK START
 1. Extract the entire ZIP to a local folder. Keep the folder structure intact.
 2. Close Outlook before conversion.
 3. Run PurviewTeamsPstToHtmlConverter.exe.
-4. Choose the Purview PST and output location. Teams, Email, Calendar, and
-   Contacts reports are all selected by default; clear any report not needed.
+4. Choose the Purview PST and output location. The GUI generates Teams, Email,
+   Calendar, and Contacts reports together.
 5. Start the conversion. The converter temporarily attaches the PST to Outlook.
 
 OUTPUTS
+- Dashboard: <name>_Dashboard.html
 - Teams report: <name>_Teams.html
 - Email database: <name>_Email.db
 - Calendar report: <name>_Calendar.html
 - Contacts report: <name>_Contacts.html
-- Logs: a matching _Teams.log, _Email.log, _Calendar.log, or _Contacts.log
-  for each selected output
-- Teams, Calendar, and Contacts reports open in the default browser.
-- The Email Review Viewer opens the Email database automatically after conversion.
+- Logs: matching _Teams.log, _Email.log, _Calendar.log, and _Contacts.log files
+- The dashboard opens automatically after conversion. Open individual reports
+  from its color-coded report cards.
+- Email opens in the bundled Email Review Viewer through the `purview-email:`
+  link. Your browser may ask for confirmation the first time.
 
 To review an existing Email database, run
 EmailReviewViewer\EmailReviewViewer.App.exe and choose File > Open Database.
@@ -188,7 +190,7 @@ TROUBLESHOOTING
 - If Outlook COM is missing, install/repair classic Outlook and make it the
   registered desktop Outlook application. New Outlook alone is not sufficient.
 - Close Outlook before retrying PST attach/detach errors.
-- Conversion logs are written beside each selected typed report output. The
+- Conversion logs are written beside each typed report output. The
   debug converter is under Tools\ for support use.
 - Run Verify-Prerequisites.ps1 for a read-only prerequisite check.
 
@@ -213,11 +215,15 @@ EmailReviewViewer folder.
   single-file host to the current user's temporary application cache.
 
 ## Product changes
-- Calendar and Contacts static HTML reports add offline search and typed filters.
-- Teams, Email, Calendar, and Contacts are selected by default and generated in
-  one PST scan; any subset can be selected.
-- Teams, Calendar, and Contacts HTML opens in the default browser after success.
-- Packaged converter locates and opens the bundled Email Review Viewer.
+- Every successful conversion writes and opens one polished dashboard with run
+  statistics and a responsive 2x2 grid of report cards.
+- The GUI always generates Teams, Email, Calendar, and Contacts in one PST scan;
+  CLI automation can still request any subset.
+- Dashboard links open Teams, Calendar, and Contacts in new browser tabs.
+- Email opens in the bundled Email Review Viewer through a current-user
+  `purview-email:` protocol handler; `Open-EmailReport.cmd` is retained as a
+  fallback.
+- Calendar and Contacts static HTML reports provide offline search and typed filters.
 - Viewer supports validated File > Open Database switching.
 - Email review includes SQLite FTS5 search, folder counts, paging, sorting, and
   on-demand full-message detail.

@@ -1,7 +1,7 @@
 # Purview PST Reports — Data Contracts
 
-**Version:** 1.2.1.0
-**Last updated:** 2026-07-31
+**Version:** 1.3.0.0
+**Last updated:** 2026-08-06
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
 
@@ -108,12 +108,12 @@ typed logs, and their summary content.
 
 | Source | Expected |
 |--------|----------|
-| `build.ps1` default | `1.2.1.0` |
-| `README.md` | `1.2.1.0` |
-| Email Reviewer assembly/file version | `1.2.1.0` |
-| Pester build and release tests | `1.2.1.0` |
+| `build.ps1` default | `1.3.0.0` |
+| `README.md` | `1.3.0.0` |
+| Email Reviewer assembly/file version | `1.3.0.0` |
+| Pester build and release tests | `1.3.0.0` |
 
-Release 1.2.1.0 is aligned across source defaults, documentation, executable metadata, package naming, and release verification.
+Release 1.3.0.0 is aligned across source defaults, documentation, executable metadata, package naming, and release verification.
 
 ## Validation
 

@@ -2,6 +2,15 @@
 
 Generated: 2026-07-03
 
+## Version 1.3.0.0 packaging (2026-08-06)
+
+- Promotes the conversion dashboard phase from `experiment/next-phase`.
+- Every successful GUI conversion opens one polished dashboard instead of four separate report windows.
+- The dashboard summarizes the run and links to Teams, Email, Calendar, and Contacts reports in a responsive 2x2 layout.
+- Email opens through the current-user `purview-email:` protocol handler, with `Open-EmailReport.cmd` retained as a fallback.
+- The GUI always produces all four report types; CLI report-selection flags remain available for automation.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.3.0.0-win-x64.zip`.
+
 ## Version 1.2.1.0 packaging (2026-07-30)
 
 - Calendar HTML report ships the A2 three-pane UX: skinny chronological agenda (all matching meetings), month grid, and sticky detail pane.

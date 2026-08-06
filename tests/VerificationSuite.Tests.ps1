@@ -317,13 +317,13 @@ Describe 'Purview Teams PST to HTML verification suite' {
     }
 
     It 'builds debug and release executables' -Tag 'Build' {
-        $version = '1.2.1.0'
+        $version = '1.3.0.0'
         $result = & $script:invokePwshScriptCapture -FilePath $script:buildScriptPath -Arguments @('-Version', $version)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter_Debug.exe')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter.exe')) | Should -BeTrue
-        $result.StdOut | Should -Match 'built 1.2.1.0'
+        $result.StdOut | Should -Match 'built 1.3.0.0'
     }
 
     It 'release no-console executable completes NoGui sample mode without interaction' -Tag 'Build' {

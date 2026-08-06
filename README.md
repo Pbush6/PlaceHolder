@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calendar, and Contacts reports.
 
-**Current version:** 1.2.1.0
+**Current version:** 1.3.0.0
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -76,7 +76,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.2.1.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.3.0.0
 ```
 
 Outputs:
@@ -137,7 +137,7 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
 
-## Recent changes (2026-07-31, experimental)
+## Recent changes (version 1.3.0.0, 2026-08-06)
 
 - Every conversion writes `Base_Dashboard.html`, a landing page with one summary card per report produced and a link to open each one. The four cards sit two per row, each with its own accent color and icon, and each leads with the total for that report (messages, emails, appointments, or contacts) above the file name. Summary tiles across the top give items exported, reports produced, read warnings, and when the conversion ran, with the warning tile turning amber when there is anything to look at.
 - The GUI opens only the dashboard after a successful conversion and no longer has report checkboxes; all four reports always run. CLI report flags are unchanged.
