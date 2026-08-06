@@ -54,6 +54,8 @@ try {
     $logBase = [IO.Path]::Combine([IO.Path]::GetDirectoryName($log), [IO.Path]::GetFileNameWithoutExtension($log))
     $generatedPaths = @(
         "${reportBase}_Teams.html", "${reportBase}_Email.db", "${reportBase}_Calendar.html", "${reportBase}_Contacts.html",
+        "${reportBase}_Dashboard.html",
+        (Join-Path ([IO.Path]::GetDirectoryName($report)) 'Open-EmailReport.cmd'),
         "${logBase}_Teams.log", "${logBase}_Email.log", "${logBase}_Calendar.log", "${logBase}_Contacts.log"
     )
     $runId = [guid]::NewGuid().ToString('N')
@@ -69,7 +71,7 @@ try {
     $result = ($lines | Where-Object { $_ -like 'CONVERSION_RESULT|*' } | Select-Object -Last 1)
     Test-StdoutLineShape -Line $result -ExpectedPrefix 'CONVERSION_RESULT' -RequiredFields @(
         'OutputPath', 'LogPath', 'ItemsExported', 'ItemReadFailures', 'AttachmentReadFailures', 'SubfolderScanFailures',
-        'TeamsOutputPath', 'EmailOutputPath', 'CalendarOutputPath', 'ContactsOutputPath',
+        'TeamsOutputPath', 'EmailOutputPath', 'CalendarOutputPath', 'ContactsOutputPath', 'DashboardOutputPath',
         'TeamsLogPath', 'EmailLogPath', 'CalendarLogPath', 'ContactsLogPath',
         'TeamsItemsExported', 'EmailItemsExported', 'CalendarItemsExported', 'ContactsItemsExported'
     )
@@ -82,6 +84,7 @@ try {
     if ($result -notmatch 'EmailOutputPath=.*_Email\.db') { throw 'CONVERSION_RESULT missing expected EmailOutputPath' }
     if ($result -notmatch 'CalendarOutputPath=.*_Calendar\.html') { throw 'CONVERSION_RESULT missing expected CalendarOutputPath' }
     if ($result -notmatch 'ContactsOutputPath=.*_Contacts\.html') { throw 'CONVERSION_RESULT missing expected ContactsOutputPath' }
+    if ($result -notmatch 'DashboardOutputPath=.*_Dashboard\.html') { throw 'CONVERSION_RESULT missing expected DashboardOutputPath' }
     if ($result -notmatch 'TeamsLogPath=.*_Teams\.log') { throw 'CONVERSION_RESULT missing expected TeamsLogPath' }
     if ($result -notmatch 'EmailLogPath=.*_Email\.log') { throw 'CONVERSION_RESULT missing expected EmailLogPath' }
     if ($result -notmatch 'CalendarLogPath=.*_Calendar\.log') { throw 'CONVERSION_RESULT missing expected CalendarLogPath' }

@@ -14,6 +14,7 @@ Describe 'Report path naming' {
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Email.db' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Calendar.html' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Contacts.html' | Should -Be 'LArtley Messages'
+        Get-ReportPathBaseName 'C:\out\LArtley Messages_Dashboard.html' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages.html' | Should -Be 'LArtley Messages'
     }
 

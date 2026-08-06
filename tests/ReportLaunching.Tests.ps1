@@ -155,25 +155,38 @@ Describe 'Report launching' {
         $launcherText | Should -Match '(?s)function Start-NoGuiMode \{.*Get-ConversionPathsFromResultLine -ResultLine \$result\.ResultLine'
     }
 
-    It 'wires four default-selected GUI report checkboxes and disables them while running' {
+    It 'always generates all four reports from the GUI without report checkboxes' {
         $launcherText = Get-Content -LiteralPath $script:launcherPath -Raw
 
         foreach ($name in @('teamsCheck', 'emailCheck', 'calendarCheck', 'contactsCheck')) {
-            $launcherText | Should -Match ('\${0}\.Checked\s*=\s*\$true' -f $name)
-            $launcherText | Should -Match ('\${0}\.Enabled\s*=\s*\$Enabled' -f $name)
-            $launcherText | Should -Match ('\${0}\.Add_CheckedChanged\(' -f $name)
+            $launcherText | Should -Not -Match ('\${0}\.Checked' -f $name)
         }
-        $launcherText | Should -Match 'At least one box must be checked \(Teams, Email, Calendar, and/or Contacts report\)\.'
+        $launcherText | Should -Not -Match 'At least one box must be checked'
+        $launcherText | Should -Match '-TeamsReport:\$true -EmailReport:\$true -CalendarReport:\$true -ContactsReport:\$true'
     }
 
-    It 'gates typed outputs before launching each selected report once' {
+    It 'gates typed outputs and opens only the dashboard after success' {
         $launcherText = Get-Content -LiteralPath $script:launcherPath -Raw
 
-        $launcherText | Should -Match '(?s)Get-ReportOutputPaths .*CalendarReport \$calendarCheck\.Checked .*ContactsReport \$contactsCheck\.Checked'
+        $launcherText | Should -Match '(?s)Get-ReportOutputPaths .*-CalendarReport \$true .*-ContactsReport \$true'
         $launcherText | Should -Match '\$logOutputPaths\s*=\s*Get-ReportOutputPaths'
         $launcherText | Should -Match '\$existingWritePaths'
         $launcherText | Should -Match 'selected report/log file\(s\)'
-        $launcherText | Should -Match '(?s)if \(\$proc\.ExitCode -ne 0\).*Assert-SelectedConversionArtifacts.*foreach \(\$path in @\(\$script:lastReportPaths \| Select-Object -Unique\)\).*Open-GeneratedReport'
+        $launcherText | Should -Match '(?s)if \(\$proc\.ExitCode -ne 0\).*Assert-SelectedConversionArtifacts.*Get-DashboardLaunchPath.*Open-GeneratedReport'
+        $launcherText | Should -Not -Match 'foreach \(\$path in @\(\$script:lastReportPaths \| Select-Object -Unique\)\)'
+    }
+
+    It 'prefers the dashboard path from the result line and falls back to the output base' {
+        Import-LauncherFunction 'Get-DashboardOutputPath'
+        Import-LauncherFunction 'Get-DashboardLaunchPath'
+
+        $line = 'CONVERSION_RESULT|OutputPath=C:\Reports\case.html|DashboardOutputPath=C:\Reports\case_Dashboard.html'
+        $parsed = ConvertFrom-ResultLine -ResultLine $line
+
+        Get-DashboardLaunchPath -Fields $parsed -DisplayPath 'C:\Reports\ignored.html' |
+            Should -Be 'C:\Reports\case_Dashboard.html'
+        Get-DashboardLaunchPath -Fields @{} -DisplayPath 'C:\Reports\case_Calendar.html' |
+            Should -Be 'C:\Reports\case_Dashboard.html'
     }
 
     It 'rejects a selected typed output that is missing on disk' {

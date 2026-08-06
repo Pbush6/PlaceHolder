@@ -50,6 +50,7 @@
       "required": [
         "prefix", "OutputPath", "LogPath", "ItemsExported",
         "TeamsOutputPath", "EmailOutputPath", "CalendarOutputPath", "ContactsOutputPath",
+        "DashboardOutputPath",
         "TeamsLogPath", "EmailLogPath", "CalendarLogPath", "ContactsLogPath",
         "TeamsItemsExported", "EmailItemsExported", "CalendarItemsExported", "ContactsItemsExported",
         "ItemReadFailures", "AttachmentReadFailures", "SubfolderScanFailures"
@@ -63,6 +64,7 @@
         "EmailOutputPath": { "type": "string" },
         "CalendarOutputPath": { "type": "string" },
         "ContactsOutputPath": { "type": "string" },
+        "DashboardOutputPath": { "type": "string", "minLength": 1 },
         "TeamsLogPath": { "type": "string" },
         "EmailLogPath": { "type": "string" },
         "CalendarLogPath": { "type": "string" },

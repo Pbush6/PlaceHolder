@@ -1,7 +1,7 @@
 # Purview PST Reports — Data Contracts
 
 **Version:** 1.2.1.0
-**Last updated:** 2026-07-30
+**Last updated:** 2026-07-31
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
 
@@ -13,7 +13,7 @@ All lines are single-line, pipe-separated `Key=Value` fields. Optional `RunId=<3
 |--------|--------------|-----------------|
 | `CONVERSION_PROGRESS` | During PST scan | `ItemsAttempted`, `ItemsExported`, `FoldersScanned`, `ItemReadFailures`, `ElapsedSeconds`, `RatePerMinute`, `FolderPath` |
 | `CONVERSION_STAGE` | Report lifecycle | `Stage` (+ optional `Written`, `Total` for `WritingReport`); includes `ImportingEmailDatabase` |
-| `CONVERSION_RESULT` | Success only | Backward-compatible `OutputPath`, `LogPath`, `ItemsExported`, failure counters; typed `TeamsOutputPath`, `EmailOutputPath`, `CalendarOutputPath`, `ContactsOutputPath`, corresponding typed log paths, and per-report exported counts |
+| `CONVERSION_RESULT` | Success only | Backward-compatible `OutputPath`, `LogPath`, `ItemsExported`, failure counters; typed `TeamsOutputPath`, `EmailOutputPath`, `CalendarOutputPath`, `ContactsOutputPath`, corresponding typed log paths, per-report exported counts, and a trailing `DashboardOutputPath` |
 | `CONVERSION_ERROR` | Fatal failure (before throw) | `ExitCode`, `Message` (max 500 chars, no CR/LF/pipes) |
 
 **Schema:** `docs/schemas/stdout-contract.schema.json`
@@ -28,7 +28,7 @@ Format: `yyyy-MM-ddTHH:mm:ss [INFO|WARN|ERROR] message`
 - UTF-8 without BOM
 - Truncated fresh each run
 
-Summary line includes the `subfolderScanFailures` counter. The result line always carries all four typed output/log fields and per-report counts; paths for unselected reports are empty. The six-item sample exports 2 Teams, 2 Email, 1 Calendar, and 1 Contacts item (`ItemsExported=6`).
+Summary line includes the `subfolderScanFailures` counter. The result line always carries all four typed output/log fields and per-report counts; paths for unselected reports are empty. `DashboardOutputPath` is always populated because the dashboard is written on every successful run. The six-item sample exports 2 Teams, 2 Email, 1 Calendar, and 1 Contacts item (`ItemsExported=6`).
 
 ## 3. In-memory message record (core internal)
 
@@ -58,6 +58,12 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 
 **Contacts report:** static HTML named `Base_Contacts.html`, with encoded contact/distribution-list records and dataset-backed text search, folder, and category filters.
 
+**Dashboard:** static HTML named `Base_Dashboard.html`, written on every successful run. It carries its own self-contained stylesheet (no external fonts, scripts, or images) rather than the report CSS. The header names the source PST, and four summary tiles report items exported (with folders scanned), reports produced, read warnings, and the generated timestamp; the warning tile turns amber when the item and attachment warning total is above zero, and keeps the `Items: n; Attachments: n` split as its detail line. Below that sits one `dashboard-card` per report produced, marked with `data-report='teams|email|calendar|contacts'` and `data-item-count` (raw, ungrouped). Cards are laid out two per row, each with its own accent color and inline SVG icon. Each card leads with a headline count labelled for that report (`Total messages`, `Total emails`, `Total appointments`, `Total contacts`) and ends with the output file name. Displayed counts are grouped with thousands separators; log file names are not shown. Cards are omitted for reports that were not produced. Links are file names relative to the dashboard, so the dashboard and its reports must stay in the same folder.
+
+**Email launch protocol:** producing an Email report registers `HKCU\Software\Classes\purview-email` with `URL Protocol` and `shell\open\command` = `"<resolved viewer>" "%1"`, and the dashboard Email card links to `purview-email:<url-encoded absolute .db path>`. The viewer's `DatabaseArgument.Resolve` strips the scheme, unescapes, and treats the remainder as the database path. Registration failure is non-fatal: the core logs a warning and the card falls back to the launch helper.
+
+**Email launch helper:** `Open-EmailReport.cmd`, written beside the reports only when the Email report is produced, as the fallback path when the protocol is unavailable or blocked. It prefers `PURVIEW_EMAIL_VIEWER_PATH`, falls back to the viewer path resolved when the helper was generated, and reports the searched path and pauses when the viewer or `.db` is missing.
+
 All user-controlled text passes `ConvertTo-HtmlEncodedText`.
 
 ## 5. Email NDJSON import
@@ -80,10 +86,10 @@ UTF-8 without BOM, one JSON object per physical line. Required data fields are `
 | Stdout | Async queue (GUI) or synchronous drain (NoGui) |
 | Stderr | Concurrent drain (NoGui) to prevent pipe deadlock |
 | Cancel | `taskkill /T /F` + Job Object `KILL_ON_JOB_CLOSE` |
-| Report flags | Explicit `TeamsReport`, `EmailReport`, `CalendarReport`, `ContactsReport`; all default `true`; CLI and GUI reject all four `false` |
+| Report flags | Explicit `TeamsReport`, `EmailReport`, `CalendarReport`, `ContactsReport`; all default `true`; the CLI rejects all four `false`. The GUI has no report selection and always forwards all four as `true`. |
 | Legacy flag binding | A direct core/launcher call that explicitly binds `TeamsReport` and/or `EmailReport` while omitting both new flags uses legacy two-report behavior (`CalendarReport=false`, `ContactsReport=false`). Calls binding neither family retain all-four defaults. The current launcher always forwards all four flags explicitly. |
 | Success | ExitCode 0, valid `CONVERSION_RESULT`, and every selected report's typed output and typed log fields are non-empty and reference existing files |
-| Launch | Email `.db` opens in Email Reviewer; Teams/Calendar/Contacts HTML opens in the default browser, once per selected output and only after success |
+| Launch | After success the GUI opens only `DashboardOutputPath` (falling back to `Base_Dashboard.html` derived from the output box). Individual reports are opened from the dashboard, or by **Open Report** when no dashboard exists. |
 
 The no-console release EXE is compiled with PS2EXE `-NoOutput`. It therefore
 does not expose stdout or `CONVERSION_RESULT` to scripted consumers. Use the
