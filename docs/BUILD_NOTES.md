@@ -2,6 +2,13 @@
 
 Generated: 2026-07-03
 
+## Version 1.3.1.0 packaging (2026-08-21)
+
+- Contacts HTML ships an Outlook People three-pane view grouped Internal, External, and Schools.
+- Classification uses Email1/Email2/Email3; `perfectionlearning.com` is Internal and wins over `.edu` Schools.
+- The selected-contact card omits empty attributes.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.3.1.0-win-x64.zip`.
+
 ## Version 1.3.0.0 packaging (2026-08-06)
 
 - Promotes the conversion dashboard phase from `experiment/next-phase`.

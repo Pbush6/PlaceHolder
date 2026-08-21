@@ -223,7 +223,10 @@ EmailReviewViewer folder.
 - Email opens in the bundled Email Review Viewer through a current-user
   `purview-email:` protocol handler; `Open-EmailReport.cmd` is retained as a
   fallback.
-- Calendar and Contacts static HTML reports provide offline search and typed filters.
+- Contacts HTML is an Outlook People view grouped Internal, External, and
+  Schools. The selected-contact card omits empty attributes.
+- Calendar HTML provides a month grid, chronological agenda, and appointment
+  detail with search and typed filters.
 - Viewer supports validated File > Open Database switching.
 - Email review includes SQLite FTS5 search, folder counts, paging, sorting, and
   on-demand full-message detail.

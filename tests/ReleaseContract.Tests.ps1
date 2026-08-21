@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Describe 'Release 1.3.0.0 contract' -Tag 'Build', 'Release' {
+Describe 'Release 1.3.1.0 contract' -Tag 'Build', 'Release' {
     BeforeAll {
         $script:repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
         $script:readmePath = Join-Path $script:repoRoot 'README.md'
@@ -13,16 +13,16 @@ Describe 'Release 1.3.0.0 contract' -Tag 'Build', 'Release' {
         $script:contractsPath = Join-Path $script:repoRoot 'docs\DATA_CONTRACTS.md'
     }
 
-    It 'keeps every executable and package version at 1.3.0.0' {
+    It 'keeps every executable and package version at 1.3.1.0' {
         (Get-Content -LiteralPath $script:readmePath -Raw) |
-            Should -Match '(?m)^\*\*Current version:\*\*\s*1\.3\.0\.0\s*$'
+            Should -Match '(?m)^\*\*Current version:\*\*\s*1\.3\.1\.0\s*$'
         (Get-Content -LiteralPath $script:buildPath -Raw) |
-            Should -Match "\[string\]\`$Version\s*=\s*'1\.3\.0\.0'"
+            Should -Match "\[string\]\`$Version\s*=\s*'1\.3\.1\.0'"
 
         [xml]$viewerProject = Get-Content -LiteralPath $script:viewerProjectPath -Raw
-        [string]$viewerProject.Project.PropertyGroup.Version | Should -Be '1.3.0.0'
-        [string]$viewerProject.Project.PropertyGroup.FileVersion | Should -Be '1.3.0.0'
-        [string]$viewerProject.Project.PropertyGroup.AssemblyVersion | Should -Be '1.3.0.0'
+        [string]$viewerProject.Project.PropertyGroup.Version | Should -Be '1.3.1.0'
+        [string]$viewerProject.Project.PropertyGroup.FileVersion | Should -Be '1.3.1.0'
+        [string]$viewerProject.Project.PropertyGroup.AssemblyVersion | Should -Be '1.3.1.0'
 
         $packageText = Get-Content -LiteralPath $script:packagePath -Raw
         $packageText | Should -Match 'PurviewTeamsPstToHtmlApp-\$version-win-x64'
@@ -87,8 +87,8 @@ Describe 'Release 1.3.0.0 contract' -Tag 'Build', 'Release' {
         $readme = Get-Content -LiteralPath $script:readmePath -Raw
         $contracts = Get-Content -LiteralPath $script:contractsPath -Raw
 
-        $readme | Should -Match 'Contacts HTML supports text search plus folder and category filters'
-        $contracts | Should -Match 'dataset-backed text search, folder, and category filters'
+        $readme | Should -Match 'Contacts HTML uses an Outlook People layout with Internal, External, and Schools folders'
+        $contracts | Should -Match 'Outlook People layout'
         $readme | Should -Not -Match 'Contacts HTML supports .*type filters'
         $contracts | Should -Not -Match 'Contacts report:.*type filters'
         foreach ($text in @($readme, $contracts)) {

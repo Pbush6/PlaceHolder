@@ -1,7 +1,7 @@
 # Purview PST Reports — Data Contracts
 
-**Version:** 1.3.0.0
-**Last updated:** 2026-08-06
+**Version:** 1.3.1.0
+**Last updated:** 2026-08-21
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
 
@@ -56,7 +56,7 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 
 **Calendar report:** static HTML named `Base_Calendar.html`, with encoded appointment/meeting records and dataset-backed search/date/folder/type/all-day/recurrence filters.
 
-**Contacts report:** static HTML named `Base_Contacts.html`, with encoded contact/distribution-list records and dataset-backed text search, folder, and category filters.
+**Contacts report:** static HTML named `Base_Contacts.html`, with encoded contact/distribution-list records in an Outlook People layout. Contacts are classified into Internal (`perfectionlearning.com`), Schools (`.edu`), or External from Email1/Email2/Email3; the page filters by those folders plus text search.
 
 **Dashboard:** static HTML named `Base_Dashboard.html`, written on every successful run. It carries its own self-contained stylesheet (no external fonts, scripts, or images) rather than the report CSS. The header names the source PST, and four summary tiles report items exported (with folders scanned), reports produced, read warnings, and the generated timestamp; the warning tile turns amber when the item and attachment warning total is above zero, and keeps the `Items: n; Attachments: n` split as its detail line. Below that sits one `dashboard-card` per report produced, marked with `data-report='teams|email|calendar|contacts'` and `data-item-count` (raw, ungrouped). Cards are laid out two per row, each with its own accent color and inline SVG icon. Each card leads with a headline count labelled for that report (`Total messages`, `Total emails`, `Total appointments`, `Total contacts`) and ends with the output file name. Displayed counts are grouped with thousands separators; log file names are not shown. Cards are omitted for reports that were not produced. Links are file names relative to the dashboard, so the dashboard and its reports must stay in the same folder.
 
@@ -108,12 +108,12 @@ typed logs, and their summary content.
 
 | Source | Expected |
 |--------|----------|
-| `build.ps1` default | `1.3.0.0` |
-| `README.md` | `1.3.0.0` |
-| Email Reviewer assembly/file version | `1.3.0.0` |
-| Pester build and release tests | `1.3.0.0` |
+| `build.ps1` default | `1.3.1.0` |
+| `README.md` | `1.3.1.0` |
+| Email Reviewer assembly/file version | `1.3.1.0` |
+| Pester build and release tests | `1.3.1.0` |
 
-Release 1.3.0.0 is aligned across source defaults, documentation, executable metadata, package naming, and release verification.
+Release 1.3.1.0 is aligned across source defaults, documentation, executable metadata, package naming, and release verification.
 
 ## Validation
 

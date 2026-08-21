@@ -2371,6 +2371,104 @@ function Get-CalendarSensitivityLabel {
     }
 }
 
+function Get-ContactEmailDomain {
+    param([AllowNull()][object]$Email)
+
+    $text = [string]$Email
+    if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+    $match = [regex]::Match($text, '[^<>\s;]+@([^<>\s;]+)')
+    if (-not $match.Success) { return '' }
+    return $match.Groups[1].Value.Trim().TrimEnd('.').ToLowerInvariant()
+}
+
+function Get-ContactAudienceBucket {
+    param([Parameter(Mandatory = $true)]$Record)
+
+    $emails = @(
+        (Get-PropSafe -Object $Record -Name 'Email1' -Default ''),
+        (Get-PropSafe -Object $Record -Name 'Email2' -Default ''),
+        (Get-PropSafe -Object $Record -Name 'Email3' -Default '')
+    )
+    $domains = @(
+        $emails |
+            ForEach-Object { Get-ContactEmailDomain $_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+
+    foreach ($domain in $domains) {
+        if ($domain -eq 'perfectionlearning.com' -or $domain.EndsWith('.perfectionlearning.com')) {
+            return 'internal'
+        }
+    }
+    foreach ($domain in $domains) {
+        if ($domain -eq 'edu' -or $domain.EndsWith('.edu')) {
+            return 'schools'
+        }
+    }
+    return 'external'
+}
+
+function Get-ContactInitials {
+    param([Parameter(Mandatory = $true)]$Record)
+
+    $first = ([string](Get-PropSafe -Object $Record -Name 'FirstName' -Default '')).Trim()
+    $last = ([string](Get-PropSafe -Object $Record -Name 'LastName' -Default '')).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($first) -and -not [string]::IsNullOrWhiteSpace($last)) {
+        return ($first.Substring(0, 1) + $last.Substring(0, 1)).ToUpperInvariant()
+    }
+
+    $name = ([string](Get-PropSafe -Object $Record -Name 'DisplayName' -Default '')).Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        $name = ([string](Get-PropSafe -Object $Record -Name 'FullName' -Default '')).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($name) -or $name -eq '(no display name)') { return '?' }
+
+    $letters = New-Object System.Collections.Generic.List[string]
+    foreach ($word in @($name -split '\s+')) {
+        if ([string]::IsNullOrWhiteSpace($word)) { continue }
+        if ($word.StartsWith('(') -or $word.StartsWith('[')) { continue }
+        $char = [string]$word[0]
+        if ($char -match '[A-Za-z0-9]') {
+            [void]$letters.Add($char.ToUpperInvariant())
+        }
+        if ($letters.Count -ge 2) { break }
+    }
+    if ($letters.Count -eq 0) { return '?' }
+    return ($letters -join '')
+}
+
+function Get-ContactAvatarColor {
+    param([AllowNull()][string]$Seed)
+
+    $text = if ([string]::IsNullOrWhiteSpace($Seed)) { '?' } else { $Seed }
+    $hash = 0
+    foreach ($char in $text.ToCharArray()) {
+        $hash = (($hash * 31) + [int]$char) -band 0x7fffffff
+    }
+    $palette = @('#0f6cbd', '#107c10', '#5c2d91', '#c239b3', '#8a5a12', '#d13438', '#038387', '#004e8c')
+    return $palette[$hash % $palette.Count]
+}
+
+function Get-ContactPrimaryEmail {
+    param([Parameter(Mandatory = $true)]$Record)
+
+    foreach ($name in @('Email1', 'Email2', 'Email3')) {
+        $value = ([string](Get-PropSafe -Object $Record -Name $name -Default '')).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+    }
+    return ''
+}
+
+function Get-ContactPrimaryPhone {
+    param([Parameter(Mandatory = $true)]$Record)
+
+    foreach ($name in @('BusinessPhone', 'MobilePhone', 'HomePhone', 'OtherPhone')) {
+        $value = ([string](Get-PropSafe -Object $Record -Name $name -Default '')).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+    }
+    return ''
+}
+
 function New-DetailFieldHtml {
     param(
         [Parameter(Mandatory = $true)][string]$Label,
@@ -2378,6 +2476,17 @@ function New-DetailFieldHtml {
     )
 
     return "<div class='detail-field'><div class='detail-label'>$(ConvertTo-HtmlEncodedText $Label)</div><div class='detail-value'>$(Get-RecordValueHtml $Value)</div></div>"
+}
+
+function New-OptionalDetailFieldHtml {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [AllowNull()][object]$Value
+    )
+
+    if ($null -eq $Value) { return '' }
+    if ([string]::IsNullOrWhiteSpace([string]$Value)) { return '' }
+    return (New-DetailFieldHtml -Label $Label -Value $Value)
 }
 
 function New-RecordListHtml {
@@ -2391,10 +2500,14 @@ function New-RecordListHtml {
 }
 
 function Get-StaticAttachmentMetadataHtml {
-    param([AllowNull()][object[]]$Attachments)
+    param(
+        [AllowNull()][object[]]$Attachments,
+        [switch]$OmitEmpty
+    )
 
     $attachmentRows = @($Attachments)
     if ($attachmentRows.Count -eq 0) {
+        if ($OmitEmpty) { return '' }
         return @"
 <section class='record-section'>
   <h3>Attachment metadata</h3>
@@ -2921,54 +3034,141 @@ function Get-CalendarReportScript {
 '@
 }
 
+function Get-ContactsReportCss {
+    return @'
+:root { --ink: #201f1e; --muted: #605e5c; --line: #d2d0ce; --fill: #faf9f8; --selected: #edebe9; --accent: #0f6cbd; --folder-pane-width: 220px; --list-pane-width: 360px; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; color: var(--ink); background: #fff; font-family: "Segoe UI", "Segoe UI Variable Text", Arial, sans-serif; line-height: 1.4; }
+.contacts-page { display: flex; flex-direction: column; height: 100vh; min-height: 100vh; }
+.contacts-topbar { flex: 0 0 auto; padding: 10px 16px 8px; border-bottom: 1px solid var(--line); background: #fff; position: relative; }
+.contacts-topbar h1 { margin: 0; font-size: 1.15rem; font-weight: 700; color: #201f1e; }
+.contacts-topbar p { margin: 2px 0 0; color: var(--muted); font-size: .85rem; }
+.contacts-topbar-credit { position: absolute; right: 16px; bottom: 8px; font-size: .75rem; color: var(--muted); font-weight: 600; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.contacts-shell { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--folder-pane-width) 8px var(--list-pane-width) 8px minmax(0, 1fr); }
+.contacts-folders, .contacts-list-pane, .contacts-detail { min-width: 0; min-height: 0; overflow: auto; background: #fff; }
+.contacts-folders { background: var(--fill); border-right: 1px solid var(--line); padding: 12px 10px 16px; }
+.contacts-folders h2 { margin: 0 12px 10px; font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #605e5c; }
+.contacts-folder { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; padding: 8px 12px; margin: 0 0 2px; background: transparent; color: #201f1e; font: inherit; font-weight: 600; cursor: pointer; }
+.contacts-folder:hover { background: #f3f2f1; }
+.contacts-folder.selected { background: #e1dfdd; font-weight: 700; }
+.contacts-resize-handle { background: #fff; cursor: col-resize; touch-action: none; position: relative; }
+.contacts-resize-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: #c8c6c4; }
+.contacts-resize-handle:hover::after, .contacts-resize-handle.dragging::after { background: var(--accent); width: 3px; left: 2px; }
+.contacts-resize-handle:focus { outline: 2px solid rgba(15, 108, 189, .45); outline-offset: -2px; }
+.contacts-list-pane { display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.contacts-list-toolbar { flex: 0 0 auto; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fff; }
+.contacts-list-toolbar input[type="search"] { width: 100%; padding: 8px 10px; border: 1px solid #8a8886; border-radius: 4px; font: inherit; background: #fff; color: #201f1e; }
+.contacts-list-toolbar .result-count { display: block; margin-top: 6px; color: var(--muted); font-size: .78rem; font-weight: 700; }
+.contacts-people-list { flex: 1; min-height: 0; overflow: auto; }
+.contact-row { content-visibility: auto; contain-intrinsic-size: auto 72px; border-bottom: 1px solid #edebe9; }
+.contact-row[hidden] { display: none; }
+.contact-row.selected { background: var(--selected); }
+.contact-row-button { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; padding: 10px 12px; border: 0; background: transparent; color: #201f1e; text-align: left; font: inherit; cursor: pointer; }
+.contact-row-button:hover { background: #f3f2f1; }
+.contact-row.selected .contact-row-button { background: transparent; }
+.contact-avatar { width: 40px; height: 40px; border-radius: 50%; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: .82rem; font-weight: 700; letter-spacing: .02em; }
+.contact-row-name { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-row-company, .contact-row-email { display: block; color: #605e5c; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contacts-detail { padding: 18px 22px 28px; }
+.contacts-detail-empty { color: var(--muted); padding: 28px 8px; }
+.contacts-detail-empty strong { display: block; color: #201f1e; margin-bottom: 6px; font-size: 1.05rem; }
+.contacts-detail-hero { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 16px; align-items: center; margin-bottom: 18px; }
+.contacts-detail-avatar { width: 96px; height: 96px; border-radius: 50%; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: 700; }
+.contacts-detail-hero h2 { margin: 0 0 4px; font-size: 1.45rem; }
+.contacts-detail-sub { color: #605e5c; }
+.contacts-detail-facts { display: grid; gap: 8px; margin: 0 0 18px; }
+.contacts-detail-facts div { overflow-wrap: anywhere; }
+.details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.detail-field { border: 1px solid #edebe9; border-radius: 8px; background: #faf9f8; padding: 10px 12px; }
+.detail-label { color: var(--muted); font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; margin-bottom: 4px; }
+.detail-value { overflow-wrap: anywhere; }
+.detail-list { margin: 0; padding-left: 18px; }
+.record-section { margin-top: 14px; }
+.record-section h3 { margin: 0 0 8px; font-size: .95rem; color: #201f1e; }
+.body-block { background: #fff; border: 1px solid #edebe9; border-radius: 8px; padding: 12px; overflow-wrap: anywhere; }
+.meta-table { margin-top: 0; border-collapse: collapse; width: 100%; }
+.meta-table th, .meta-table td { border: 1px solid var(--line); padding: 8px; vertical-align: top; text-align: left; }
+.meta-table th { background: var(--fill); }
+.empty { color: var(--muted); font-style: italic; }
+.contacts-log { margin-top: 18px; color: var(--muted); font-size: .78rem; }
+@media (max-width: 900px) {
+  .contacts-page { height: auto; min-height: 100vh; }
+  .contacts-shell { display: block; }
+  .contacts-resize-handle { display: none; }
+  .contacts-folders, .contacts-list-pane, .contacts-detail { max-height: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  .contacts-people-list { max-height: 50vh; }
+}
+'@
+}
+
 function Get-ContactsReportScript {
     return @'
 (function () {
   const searchInput = document.getElementById('contactsSearch');
-  const folderSelect = document.getElementById('contactsFolderFilter');
-  const categorySelect = document.getElementById('contactsCategoryFilter');
-  const clearBtn = document.getElementById('contactsClearFiltersBtn');
   const visibleCount = document.getElementById('contactsVisibleCount');
-  const cards = Array.from(document.querySelectorAll('.record-card'));
-  const totalCount = cards.length;
+  const detail = document.getElementById('contactsDetail');
+  const shell = document.getElementById('contactsShell');
+  const folderButtons = Array.from(document.querySelectorAll('.contacts-folder'));
+  const rows = Array.from(document.querySelectorAll('.contact-row'));
+  const folderHandle = document.getElementById('contactsFolderResizeHandle');
+  const listHandle = document.getElementById('contactsListResizeHandle');
+  const totalCount = rows.length;
+  let selectedAudience = (shell && shell.dataset.defaultAudience) ? shell.dataset.defaultAudience : 'internal';
+  let selectedEntryId = '';
   let scheduled = false;
 
-  function parseList(value) {
-    if (!value) return [];
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  cards.forEach(card => {
-    card._search = (card.dataset.search || '').toLowerCase();
-    card._folder = (card.dataset.folder || '').toLowerCase();
-    card._categories = parseList(card.dataset.categories).map(v => String(v).toLowerCase());
+  rows.forEach(row => {
+    row._search = (row.dataset.search || '').toLowerCase();
+    row._audience = (row.dataset.audience || '').toLowerCase();
   });
+
+  function safeGetLocalStorage(key) {
+    try { return localStorage.getItem(key); } catch (_) { return null; }
+  }
+  function safeSetLocalStorage(key, value) {
+    try { localStorage.setItem(key, value); } catch (_) { }
+  }
 
   function updateVisibleCount(shown) {
     if (!visibleCount) return;
-    visibleCount.textContent = shown + ' of ' + totalCount + ' records shown';
+    visibleCount.textContent = shown + ' of ' + totalCount + ' contacts shown';
+  }
+
+  function selectContact(row) {
+    rows.forEach(item => item.classList.remove('selected'));
+    if (!row) {
+      selectedEntryId = '';
+      if (detail) detail.innerHTML = "<div class='contacts-detail-empty'><strong>Select a contact</strong>Choose a person from the list.</div>";
+      return;
+    }
+    row.classList.add('selected');
+    selectedEntryId = row.dataset.entryId || '';
+    const source = row.querySelector('.contact-detail-source');
+    if (detail && source) detail.innerHTML = source.innerHTML;
   }
 
   function applyFilters() {
     const query = searchInput ? (searchInput.value || '').trim().toLowerCase() : '';
-    const folder = folderSelect ? (folderSelect.value || '').toLowerCase() : '';
-    const category = categorySelect ? (categorySelect.value || '').toLowerCase() : '';
     let shown = 0;
-
-    cards.forEach(card => {
-      const show = (!query || card._search.indexOf(query) !== -1)
-        && (!folder || card._folder === folder)
-        && (!category || card._categories.indexOf(category) !== -1);
-      card.hidden = !show;
-      if (show) shown += 1;
+    let firstVisible = null;
+    let selectedVisible = null;
+    rows.forEach(row => {
+      const show = row._audience === selectedAudience
+        && (!query || row._search.indexOf(query) !== -1);
+      row.hidden = !show;
+      if (show) {
+        shown += 1;
+        if (!firstVisible) firstVisible = row;
+        if ((row.dataset.entryId || '') === selectedEntryId) selectedVisible = row;
+      }
     });
-
+    folderButtons.forEach(btn => {
+      btn.classList.toggle('selected', (btn.dataset.audience || '') === selectedAudience);
+    });
     updateVisibleCount(shown);
+    selectContact(selectedVisible || firstVisible);
   }
 
   function scheduleApply() {
@@ -2980,18 +3180,81 @@ function Get-ContactsReportScript {
     });
   }
 
-  function resetFilters() {
-    if (searchInput) searchInput.value = '';
-    if (folderSelect) folderSelect.value = '';
-    if (categorySelect) categorySelect.value = '';
-    applyFilters();
+  folderButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedAudience = (btn.dataset.audience || '').toLowerCase();
+      selectedEntryId = '';
+      applyFilters();
+    });
+  });
+  rows.forEach(row => {
+    const button = row.querySelector('.contact-row-button');
+    if (button) button.addEventListener('click', () => selectContact(row));
+  });
+  if (searchInput) searchInput.addEventListener('input', scheduleApply);
+
+  function setupColumnResize() {
+    if (!shell) return;
+    const savedFolder = safeGetLocalStorage('purviewContactsReport.folderPaneWidth');
+    const savedList = safeGetLocalStorage('purviewContactsReport.listPaneWidth');
+    if (savedFolder) shell.style.setProperty('--folder-pane-width', savedFolder);
+    if (savedList) shell.style.setProperty('--list-pane-width', savedList);
+
+    function attachHandle(handle, kind) {
+      if (!handle) return;
+      let dragging = false;
+      function setFromClientX(clientX) {
+        const rect = shell.getBoundingClientRect();
+        if (kind === 'folder') {
+          const max = Math.max(160, Math.min(420, rect.width - 360));
+          const width = Math.max(160, Math.min(max, clientX - rect.left));
+          const value = Math.round(width) + 'px';
+          shell.style.setProperty('--folder-pane-width', value);
+          safeSetLocalStorage('purviewContactsReport.folderPaneWidth', value);
+        } else {
+          const folderWidth = parseInt(getComputedStyle(shell).getPropertyValue('--folder-pane-width'), 10) || 220;
+          const handleWidth = folderHandle ? folderHandle.getBoundingClientRect().width : 8;
+          const listLeft = rect.left + folderWidth + handleWidth;
+          const max = Math.max(220, Math.min(640, rect.width - folderWidth - 280));
+          const width = Math.max(220, Math.min(max, clientX - listLeft));
+          const value = Math.round(width) + 'px';
+          shell.style.setProperty('--list-pane-width', value);
+          safeSetLocalStorage('purviewContactsReport.listPaneWidth', value);
+        }
+      }
+      handle.addEventListener('pointerdown', event => {
+        dragging = true;
+        handle.classList.add('dragging');
+        handle.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      handle.addEventListener('pointermove', event => { if (dragging) setFromClientX(event.clientX); });
+      function stopDragging(event) {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('dragging');
+        try { handle.releasePointerCapture(event.pointerId); } catch (_) { }
+      }
+      handle.addEventListener('pointerup', stopDragging);
+      handle.addEventListener('pointercancel', stopDragging);
+      handle.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        const prop = kind === 'folder' ? '--folder-pane-width' : '--list-pane-width';
+        const min = kind === 'folder' ? 160 : 220;
+        const max = kind === 'folder' ? 420 : 640;
+        const current = parseInt(getComputedStyle(shell).getPropertyValue(prop), 10) || min;
+        const delta = event.key === 'ArrowRight' ? 20 : -20;
+        const value = Math.max(min, Math.min(max, current + delta)) + 'px';
+        shell.style.setProperty(prop, value);
+        safeSetLocalStorage(kind === 'folder' ? 'purviewContactsReport.folderPaneWidth' : 'purviewContactsReport.listPaneWidth', value);
+        event.preventDefault();
+      });
+    }
+    attachHandle(folderHandle, 'folder');
+    attachHandle(listHandle, 'list');
   }
 
-  if (searchInput) searchInput.addEventListener('input', scheduleApply);
-  if (folderSelect) folderSelect.addEventListener('change', applyFilters);
-  if (categorySelect) categorySelect.addEventListener('change', applyFilters);
-  if (clearBtn) clearBtn.addEventListener('click', resetFilters);
-
+  setupColumnResize();
   requestAnimationFrame(applyFilters);
 })();
 '@
@@ -3124,13 +3387,15 @@ function Write-ContactsReportHeader {
         [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
         [Parameter(Mandatory = $true)]$PstItem,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SortedRecords,
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$FolderOptions,
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$CategoryOptions,
+        [Parameter(Mandatory = $true)][int]$InternalCount,
+        [Parameter(Mandatory = $true)][int]$ExternalCount,
+        [Parameter(Mandatory = $true)][int]$SchoolsCount,
+        [Parameter(Mandatory = $true)][string]$DefaultAudience,
         [Parameter(Mandatory = $true)][string]$LogPath
     )
 
     $generated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    $css = Get-StaticRecordReportCss
+    $css = Get-ContactsReportCss
     $Writer.WriteLine(@"
 <!doctype html>
 <html lang='en'>
@@ -3143,60 +3408,33 @@ $css
 </style>
 </head>
 <body>
-<div class='page'>
-  <header class='hero'>
-    <h1>Microsoft Purview eDiscovery Contacts Report</h1>
-    <p>Static offline review of contacts and distribution lists with client-side search, folder filtering, and category filtering.</p>
-    <div class='hero-credit'>By Patrick Bush</div>
+<div class='contacts-page'>
+  <header class='contacts-topbar'>
+    <h1>Contacts</h1>
+    <p>$(ConvertTo-HtmlEncodedText $PstItem.Name) · $(ConvertTo-HtmlEncodedText $SortedRecords.Count) contacts · $(ConvertTo-HtmlEncodedText $generated)</p>
+    <div class='contacts-topbar-credit'>By Patrick Bush</div>
   </header>
 
-  <section class='summary-grid' aria-label='Contacts report summary'>
-    <div class='summary-card'><div class='label'>PST</div><div class='value'>$(ConvertTo-HtmlEncodedText $PstItem.Name)</div></div>
-    <div class='summary-card'><div class='label'>Generated</div><div class='value'>$(ConvertTo-HtmlEncodedText $generated)</div></div>
-    <div class='summary-card'><div class='label'>Contact records</div><div class='value'>$(ConvertTo-HtmlEncodedText $SortedRecords.Count)</div></div>
-    <div class='summary-card'><div class='label'>Folders detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $FolderOptions.Count)</div></div>
-    <div class='summary-card'><div class='label'>Categories detected</div><div class='value'>$(ConvertTo-HtmlEncodedText $CategoryOptions.Count)</div></div>
-    <div class='summary-card'><div class='label'>Distribution lists</div><div class='value'>$(ConvertTo-HtmlEncodedText (@($SortedRecords | Where-Object { @($_.DistributionListMembers).Count -gt 0 }).Count))</div></div>
-  </section>
-
-  <div class='review-layout'>
-    <aside class='filter-panel' aria-label='Contacts filters'>
-      <div class='filter-title'>
-        <h2>Filter contacts</h2>
+  <div id='contactsShell' class='contacts-shell' data-default-audience='$(ConvertTo-HtmlEncodedText $DefaultAudience)'>
+    <aside class='contacts-folders' aria-label='My Contacts'>
+      <h2>My Contacts</h2>
+      <button type='button' class='contacts-folder' id='contactsFolderInternal' data-audience='internal'>Internal ($InternalCount)</button>
+      <button type='button' class='contacts-folder' id='contactsFolderExternal' data-audience='external'>External ($ExternalCount)</button>
+      <button type='button' class='contacts-folder' id='contactsFolderSchools' data-audience='schools'>Schools ($SchoolsCount)</button>
+      <div class='contacts-log'>Log file: $(ConvertTo-HtmlEncodedText $LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
+    </aside>
+    <div id='contactsFolderResizeHandle' class='contacts-resize-handle' role='separator' aria-orientation='vertical' aria-label='Resize folder pane' tabindex='0'></div>
+    <main class='contacts-list-pane' aria-label='People'>
+      <div class='contacts-list-toolbar'>
+        <label for='contactsSearch' class='visually-hidden'>Search contacts</label>
+        <input id='contactsSearch' type='search' placeholder='Search' autocomplete='off'/>
         <span id='contactsVisibleCount' class='result-count'></span>
       </div>
-      <p class='filter-help'>Search is precomputed from normalized contact names, organizations, addresses, notes, and identifiers so filtering stays fast even on large exports.</p>
-      <div class='filter-stack'>
-        <div class='filter-grid'>
-          <label for='contactsSearch'>Search
-            <input id='contactsSearch' type='search' placeholder='Names, organization, email, notes, ID' autocomplete='off'/>
-          </label>
-          <label for='contactsFolderFilter'>Folder
-            <select id='contactsFolderFilter'>
-              <option value=''>All folders</option>
-$($FolderOptions -join "`n")
-            </select>
-          </label>
-          <label for='contactsCategoryFilter'>Category
-            <select id='contactsCategoryFilter'>
-              <option value=''>All categories</option>
-$($CategoryOptions -join "`n")
-            </select>
-          </label>
-        </div>
-        <div class='filter-actions'>
-          <button type='button' class='secondary' id='contactsClearFiltersBtn'>Clear filters</button>
-        </div>
-      </div>
-      <div class='footer'>Log file: $(ConvertTo-HtmlEncodedText $LogPath)<br/>Created by Convert-PurviewTeamsPstToHtml.ps1</div>
-    </aside>
-
-    <main class='conversation-pane' aria-label='Contact records'>
-      <section id='contactsRecordList' class='record-list'>
+      <section id='contactsPeopleList' class='contacts-people-list'>
 "@)
 }
 
-function Write-StaticRecordReportFooter {
+function Write-ContactsReportFooter {
     param(
         [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
         [Parameter(Mandatory = $true)][string]$ScriptText
@@ -3205,6 +3443,10 @@ function Write-StaticRecordReportFooter {
     $Writer.WriteLine(@"
       </section>
     </main>
+    <div id='contactsListResizeHandle' class='contacts-resize-handle' role='separator' aria-orientation='vertical' aria-label='Resize people list' tabindex='0'></div>
+    <aside id='contactsDetail' class='contacts-detail' aria-label='Selected contact'>
+      <div class='contacts-detail-empty'><strong>Select a contact</strong>Choose a person from the list.</div>
+    </aside>
   </div>
 </div>
 <script>
@@ -3314,11 +3556,19 @@ function Write-CalendarRecordHtml {
 function Write-ContactRecordHtml {
     param(
         [Parameter(Mandatory = $true)][System.IO.StreamWriter]$Writer,
-        [Parameter(Mandatory = $true)]$Record
+        [Parameter(Mandatory = $true)]$Record,
+        [int]$RecordIndex = 0
     )
 
     $displayName = if ([string]::IsNullOrWhiteSpace([string]$Record.DisplayName)) { '(no display name)' } else { [string]$Record.DisplayName }
     $folderText = [string](Get-PropSafe -Object $Record -Name 'FolderPath' -Default '')
+    $entryIdText = [string](Get-PropSafe -Object $Record -Name 'EntryId' -Default '')
+    $stableEntryId = if ([string]::IsNullOrWhiteSpace($entryIdText)) { "contact-record-$RecordIndex" } else { $entryIdText }
+    $audience = Get-ContactAudienceBucket -Record $Record
+    $initials = Get-ContactInitials -Record $Record
+    $avatarColor = Get-ContactAvatarColor -Seed $displayName
+    $primaryEmail = Get-ContactPrimaryEmail -Record $Record
+    $primaryPhone = Get-ContactPrimaryPhone -Record $Record
     $categoryValues = @(Split-RecordCategories $Record.Categories)
     $categoryKeys = @($categoryValues | ForEach-Object { ConvertTo-NormalizedFilterText $_ })
     $searchParts = @(
@@ -3328,7 +3578,7 @@ function Write-ContactRecordHtml {
         $Record.BusinessAddress, $Record.HomeAddress, $Record.OtherAddress, $Record.WebPage,
         (Format-RecordDate $Record.Birthday), (Format-RecordDate $Record.Anniversary),
         ($categoryValues -join ' '), (@($Record.DistributionListMembers) -join ' '),
-        $folderText, $Record.Notes, $Record.BodyText, $Record.MessageClass, $Record.EntryId
+        $folderText, $Record.Notes, $Record.BodyText, $Record.MessageClass, $Record.EntryId, $audience
     )
     foreach ($attachment in @($Record.Attachments)) {
         $searchParts += @(
@@ -3338,58 +3588,78 @@ function Write-ContactRecordHtml {
         )
     }
     $searchText = ConvertTo-NormalizedFilterText ($searchParts -join ' ')
-    $subtitleParts = @($Record.CompanyName, $Record.JobTitle, $Record.Department | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $subtitle = if ($subtitleParts.Count -gt 0) { $subtitleParts -join ' | ' } else { '' }
+    $subtitleParts = @($Record.CompanyName, $Record.JobTitle) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $subtitle = if (@($subtitleParts).Count -gt 0) { @($subtitleParts) -join ' · ' } else { '' }
+    $listCompany = [string](Get-PropSafe -Object $Record -Name 'CompanyName' -Default '')
+    $subtitleHtml = if ([string]::IsNullOrWhiteSpace($subtitle)) { '' } else { "<div class='contacts-detail-sub'>$(ConvertTo-HtmlEncodedText $subtitle)</div>" }
+    $factRows = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($primaryEmail)) {
+        [void]$factRows.Add("<div><strong>Email</strong> $(ConvertTo-HtmlEncodedText $primaryEmail)</div>")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($primaryPhone)) {
+        [void]$factRows.Add("<div><strong>Phone</strong> $(ConvertTo-HtmlEncodedText $primaryPhone)</div>")
+    }
+    $factsHtml = if ($factRows.Count -eq 0) { '' } else { "<div class='contacts-detail-facts'>$($factRows -join '')</div>" }
+    $memberItems = @($Record.DistributionListMembers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $distributionHtml = if ($memberItems.Count -eq 0) { '' } else {
+        "<section class='record-section'><h3>Distribution list members</h3>$(New-RecordListHtml -Values $memberItems)</section>"
+    }
+    $notesText = [string](Get-PropSafe -Object $Record -Name 'Notes' -Default '')
+    $notesHtml = if ([string]::IsNullOrWhiteSpace($notesText)) { '' } else {
+        "<section class='record-section'><h3>Notes / body</h3><div class='body-block'>$(ConvertTo-HtmlBody $notesText)</div></section>"
+    }
     $Writer.WriteLine(@"
-<article class='conversation record-card' data-search='$(ConvertTo-HtmlEncodedText $searchText)' data-folder='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $folderText))' data-categories='$(ConvertTo-JsonArrayAttributeValue $categoryKeys)'>
-  <header class='record-header'>
-    <div>
-      <h2>$(ConvertTo-HtmlEncodedText $displayName)</h2>
-      <div class='record-subtitle'>$(Get-RecordValueHtml $subtitle)</div>
+<article class='contact-row' data-search='$(ConvertTo-HtmlEncodedText $searchText)' data-audience='$(ConvertTo-HtmlEncodedText $audience)' data-entry-id='$(ConvertTo-HtmlEncodedText $stableEntryId)' data-folder='$(ConvertTo-HtmlEncodedText (ConvertTo-NormalizedFilterText $folderText))' data-categories='$(ConvertTo-JsonArrayAttributeValue $categoryKeys)'>
+  <button type='button' class='contact-row-button'>
+    <span class='contact-avatar' style='background:$(ConvertTo-HtmlEncodedText $avatarColor)'>$(ConvertTo-HtmlEncodedText $initials)</span>
+    <span class='contact-row-meta'>
+      <span class='contact-row-name'>$(ConvertTo-HtmlEncodedText $displayName)</span>
+      <span class='contact-row-company'>$(ConvertTo-HtmlEncodedText $listCompany)</span>
+      <span class='contact-row-email'>$(ConvertTo-HtmlEncodedText $primaryEmail)</span>
+    </span>
+  </button>
+  <div class='contact-detail-source' hidden>
+    <div class='contacts-detail-hero'>
+      <span class='contacts-detail-avatar' style='background:$(ConvertTo-HtmlEncodedText $avatarColor)'>$(ConvertTo-HtmlEncodedText $initials)</span>
+      <div>
+        <h2>$(ConvertTo-HtmlEncodedText $displayName)</h2>
+        $subtitleHtml
+      </div>
     </div>
-    <div class='badge-row'>
-      <span class='pill'>$(ConvertTo-HtmlEncodedText ([string](Get-PropSafe -Object $Record -Name 'MessageClass' -Default 'Contact')))</span>
-      <span class='pill'>$(ConvertTo-HtmlEncodedText $folderText)</span>
-    </div>
-  </header>
-  <section class='details-grid'>
-    $(New-DetailFieldHtml -Label 'Display name' -Value $Record.DisplayName)
-    $(New-DetailFieldHtml -Label 'Full name' -Value $Record.FullName)
-    $(New-DetailFieldHtml -Label 'First name' -Value $Record.FirstName)
-    $(New-DetailFieldHtml -Label 'Middle name' -Value $Record.MiddleName)
-    $(New-DetailFieldHtml -Label 'Last name' -Value $Record.LastName)
-    $(New-DetailFieldHtml -Label 'Organization' -Value $Record.CompanyName)
-    $(New-DetailFieldHtml -Label 'Job title' -Value $Record.JobTitle)
-    $(New-DetailFieldHtml -Label 'Department' -Value $Record.Department)
-    $(New-DetailFieldHtml -Label 'Email 1' -Value $Record.Email1)
-    $(New-DetailFieldHtml -Label 'Email 2' -Value $Record.Email2)
-    $(New-DetailFieldHtml -Label 'Email 3' -Value $Record.Email3)
-    $(New-DetailFieldHtml -Label 'Business phone' -Value $Record.BusinessPhone)
-    $(New-DetailFieldHtml -Label 'Home phone' -Value $Record.HomePhone)
-    $(New-DetailFieldHtml -Label 'Mobile phone' -Value $Record.MobilePhone)
-    $(New-DetailFieldHtml -Label 'Other phone' -Value $Record.OtherPhone)
-    $(New-DetailFieldHtml -Label 'Business address' -Value $Record.BusinessAddress)
-    $(New-DetailFieldHtml -Label 'Home address' -Value $Record.HomeAddress)
-    $(New-DetailFieldHtml -Label 'Other address' -Value $Record.OtherAddress)
-    $(New-DetailFieldHtml -Label 'Website' -Value $Record.WebPage)
-    $(New-DetailFieldHtml -Label 'Birthday' -Value (Format-RecordDate $Record.Birthday))
-    $(New-DetailFieldHtml -Label 'Anniversary' -Value (Format-RecordDate $Record.Anniversary))
-    $(New-DetailFieldHtml -Label 'Categories' -Value (($categoryValues -join ', ')))
-    $(New-DetailFieldHtml -Label 'Folder' -Value $folderText)
-    $(New-DetailFieldHtml -Label 'Created' -Value (Format-RecordDateTime $Record.CreationTime))
-    $(New-DetailFieldHtml -Label 'Modified' -Value (Format-RecordDateTime $Record.LastModificationTime))
-    $(New-DetailFieldHtml -Label 'Message class' -Value $Record.MessageClass)
-    $(New-DetailFieldHtml -Label 'Entry ID' -Value $Record.EntryId)
-  </section>
-  <section class='record-section'>
-    <h3>Distribution list members</h3>
-    $(New-RecordListHtml -Values @($Record.DistributionListMembers))
-  </section>
-  $(Get-StaticAttachmentMetadataHtml -Attachments @($Record.Attachments))
-  <section class='record-section'>
-    <h3>Notes / body</h3>
-    <div class='body-block'>$(ConvertTo-HtmlBody $Record.Notes)</div>
-  </section>
+    $factsHtml
+    <section class='details-grid'>
+      $(New-OptionalDetailFieldHtml -Label 'Display name' -Value $Record.DisplayName)
+      $(New-OptionalDetailFieldHtml -Label 'Full name' -Value $Record.FullName)
+      $(New-OptionalDetailFieldHtml -Label 'First name' -Value $Record.FirstName)
+      $(New-OptionalDetailFieldHtml -Label 'Middle name' -Value $Record.MiddleName)
+      $(New-OptionalDetailFieldHtml -Label 'Last name' -Value $Record.LastName)
+      $(New-OptionalDetailFieldHtml -Label 'Organization' -Value $Record.CompanyName)
+      $(New-OptionalDetailFieldHtml -Label 'Job title' -Value $Record.JobTitle)
+      $(New-OptionalDetailFieldHtml -Label 'Department' -Value $Record.Department)
+      $(New-OptionalDetailFieldHtml -Label 'Email 1' -Value $Record.Email1)
+      $(New-OptionalDetailFieldHtml -Label 'Email 2' -Value $Record.Email2)
+      $(New-OptionalDetailFieldHtml -Label 'Email 3' -Value $Record.Email3)
+      $(New-OptionalDetailFieldHtml -Label 'Business phone' -Value $Record.BusinessPhone)
+      $(New-OptionalDetailFieldHtml -Label 'Home phone' -Value $Record.HomePhone)
+      $(New-OptionalDetailFieldHtml -Label 'Mobile phone' -Value $Record.MobilePhone)
+      $(New-OptionalDetailFieldHtml -Label 'Other phone' -Value $Record.OtherPhone)
+      $(New-OptionalDetailFieldHtml -Label 'Business address' -Value $Record.BusinessAddress)
+      $(New-OptionalDetailFieldHtml -Label 'Home address' -Value $Record.HomeAddress)
+      $(New-OptionalDetailFieldHtml -Label 'Other address' -Value $Record.OtherAddress)
+      $(New-OptionalDetailFieldHtml -Label 'Website' -Value $Record.WebPage)
+      $(New-OptionalDetailFieldHtml -Label 'Birthday' -Value (Format-RecordDate $Record.Birthday))
+      $(New-OptionalDetailFieldHtml -Label 'Anniversary' -Value (Format-RecordDate $Record.Anniversary))
+      $(New-OptionalDetailFieldHtml -Label 'Categories' -Value (($categoryValues -join ', ')))
+      $(New-OptionalDetailFieldHtml -Label 'Folder' -Value $folderText)
+      $(New-OptionalDetailFieldHtml -Label 'Created' -Value (Format-RecordDateTime $Record.CreationTime))
+      $(New-OptionalDetailFieldHtml -Label 'Modified' -Value (Format-RecordDateTime $Record.LastModificationTime))
+      $(New-OptionalDetailFieldHtml -Label 'Message class' -Value $Record.MessageClass)
+      $(New-OptionalDetailFieldHtml -Label 'Entry ID' -Value $Record.EntryId)
+    </section>
+    $distributionHtml
+    $(Get-StaticAttachmentMetadataHtml -Attachments @($Record.Attachments) -OmitEmpty)
+    $notesHtml
+  </div>
 </article>
 "@)
 }
@@ -3450,36 +3720,44 @@ function Write-ContactsHtmlReport {
     Write-ReportLog 'Preparing Contacts HTML report data.'
     Write-ConversionStage -Stage 'PreparingReport'
     $sorted = @($Records | Sort-Object DisplayName, FullName, CompanyName, FolderPath)
-    $folderMap = [ordered]@{}
-    $categoryMap = [ordered]@{}
+    $internalCount = 0
+    $externalCount = 0
+    $schoolsCount = 0
     foreach ($record in $sorted) {
-        $folderText = [string](Get-PropSafe -Object $record -Name 'FolderPath' -Default '')
-        $folderKey = ConvertTo-NormalizedFilterText $folderText
-        if (-not [string]::IsNullOrWhiteSpace($folderKey) -and -not $folderMap.Contains($folderKey)) { $folderMap[$folderKey] = $folderText }
-
-        foreach ($category in @(Split-RecordCategories $record.Categories)) {
-            $categoryKey = ConvertTo-NormalizedFilterText $category
-            if (-not [string]::IsNullOrWhiteSpace($categoryKey) -and -not $categoryMap.Contains($categoryKey)) { $categoryMap[$categoryKey] = $category }
+        switch (Get-ContactAudienceBucket -Record $record) {
+            'internal' { $internalCount++ }
+            'schools' { $schoolsCount++ }
+            default { $externalCount++ }
         }
     }
-    $folderOptions = @($folderMap.Keys | ForEach-Object { "<option value='$(ConvertTo-HtmlEncodedText $_)'>$(ConvertTo-HtmlEncodedText $folderMap[$_])</option>" })
-    $categoryOptions = @($categoryMap.Keys | ForEach-Object { "<option value='$(ConvertTo-HtmlEncodedText $_)'>$(ConvertTo-HtmlEncodedText $categoryMap[$_])</option>" })
+    $defaultAudience = 'internal'
+    foreach ($bucket in @('internal', 'external', 'schools')) {
+        $count = switch ($bucket) {
+            'internal' { $internalCount }
+            'external' { $externalCount }
+            default { $schoolsCount }
+        }
+        if ($count -gt 0) {
+            $defaultAudience = $bucket
+            break
+        }
+    }
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     $writer = [System.IO.StreamWriter]::new($ReportPath, $false, $utf8NoBom)
     try {
-        Write-ContactsReportHeader -Writer $writer -PstItem $PstItem -SortedRecords $sorted -FolderOptions $folderOptions -CategoryOptions $categoryOptions -LogPath $LogPath
+        Write-ContactsReportHeader -Writer $writer -PstItem $PstItem -SortedRecords $sorted -InternalCount $internalCount -ExternalCount $externalCount -SchoolsCount $schoolsCount -DefaultAudience $defaultAudience -LogPath $LogPath
         $writtenCount = 0
         $totalCount = [Math]::Max(1, $sorted.Count)
         foreach ($record in $sorted) {
-            Write-ContactRecordHtml -Writer $writer -Record $record
+            Write-ContactRecordHtml -Writer $writer -Record $record -RecordIndex $writtenCount
             $writtenCount++
             if (($writtenCount -eq $totalCount) -or ($writtenCount % 100 -eq 0)) {
                 Write-ReportLog "Contacts HTML report progress: $writtenCount of $totalCount records."
                 Write-ConversionStage -Stage 'WritingReport' -Extra ("Written={0}|Total={1}" -f $writtenCount, $totalCount)
             }
         }
-        Write-StaticRecordReportFooter -Writer $writer -ScriptText (Get-ContactsReportScript)
+        Write-ContactsReportFooter -Writer $writer -ScriptText (Get-ContactsReportScript)
     }
     finally {
         $writer.Dispose()
@@ -3614,7 +3892,7 @@ function Get-DashboardReportEntries {
             Key = 'contacts'; Name = 'Contacts'; OutputPath = $script:ContactsOutputPath
             ItemCount = $script:Stats.ContactsItemsExported
             Counts = @([pscustomobject]@{ Label = 'Total contacts'; Value = $script:Stats.ContactsItemsExported })
-            Description = 'Contacts and distribution lists with folder and category filters.'
+            Description = 'Outlook People view grouped Internal, External, and Schools.'
             LinkPath = $script:ContactsOutputPath
             Note = 'Opens in your default browser.'
         }

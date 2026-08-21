@@ -51,6 +51,57 @@ Describe 'Calendar and contacts HTML reports' {
                 StdOut = $mergedOutput
             }
         }
+
+        function script:New-TestContactRecord {
+            param(
+                [string]$DisplayName = 'Test Contact',
+                [string]$FirstName = '',
+                [string]$LastName = '',
+                [string]$CompanyName = '',
+                [string]$JobTitle = '',
+                [string]$Email1 = '',
+                [string]$Email2 = '',
+                [string]$Email3 = '',
+                [string]$Categories = '',
+                [string]$FolderPath = 'Mailbox\Contacts',
+                [string]$EntryId = 'test-contact',
+                [string[]]$DistributionListMembers = @()
+            )
+
+            return [pscustomobject]@{
+                DisplayName = $DisplayName
+                FullName = $DisplayName
+                FirstName = $FirstName
+                MiddleName = ''
+                LastName = $LastName
+                CompanyName = $CompanyName
+                JobTitle = $JobTitle
+                Department = ''
+                Email1 = $Email1
+                Email2 = $Email2
+                Email3 = $Email3
+                BusinessPhone = ''
+                HomePhone = ''
+                MobilePhone = ''
+                OtherPhone = ''
+                BusinessAddress = ''
+                HomeAddress = ''
+                OtherAddress = ''
+                WebPage = ''
+                Birthday = $null
+                Anniversary = $null
+                Categories = $Categories
+                FolderPath = $FolderPath
+                Notes = ''
+                BodyText = ''
+                MessageClass = 'IPM.Contact'
+                EntryId = $EntryId
+                CreationTime = $null
+                LastModificationTime = $null
+                DistributionListMembers = @($DistributionListMembers)
+                Attachments = @()
+            }
+        }
     }
 
     BeforeEach {
@@ -71,6 +122,80 @@ Describe 'Calendar and contacts HTML reports' {
 
         $calendarWriter | Should -Not -BeNullOrEmpty -Because 'Task 3 requires a dedicated Calendar HTML writer'
         $contactsWriter | Should -Not -BeNullOrEmpty -Because 'Task 3 requires a dedicated Contacts HTML writer'
+    }
+
+    It 'classifies Internal over Schools, then Schools, then External from Email1/2/3' {
+        (Get-ContactAudienceBucket (New-TestContactRecord -Email1 'pat@iowa.edu' -Email2 'pat@perfectionlearning.com')).ToLowerInvariant() |
+            Should -Be 'internal'
+        (Get-ContactAudienceBucket (New-TestContactRecord -Email1 'Pat Bush <pbush@mail.perfectionlearning.com>')).ToLowerInvariant() |
+            Should -Be 'internal'
+        (Get-ContactAudienceBucket (New-TestContactRecord -Email1 'teacher@state.edu')).ToLowerInvariant() |
+            Should -Be 'schools'
+        (Get-ContactAudienceBucket (New-TestContactRecord -Email3 'Dean <dean@college.edu>')).ToLowerInvariant() |
+            Should -Be 'schools'
+        (Get-ContactAudienceBucket (New-TestContactRecord -Email1 'curriculum@example.com')).ToLowerInvariant() |
+            Should -Be 'external'
+        (Get-ContactAudienceBucket (New-TestContactRecord)).ToLowerInvariant() |
+            Should -Be 'external'
+        (Get-ContactAudienceBucket (New-TestContactRecord -Email1 'list@dist.example' -DistributionListMembers @('a@iowa.edu'))).ToLowerInvariant() |
+            Should -Be 'external'
+    }
+
+    It 'renders Outlook People folders Internal, External, Schools with one audience per contact' {
+        $contactsPath = Join-Path $TestDrive 'outlook-people-contacts.html'
+        $pstItem = [pscustomobject]@{ Name = 'People PST.pst' }
+        $records = @(
+            (New-TestContactRecord -DisplayName 'Pat Bush' -FirstName 'Pat' -LastName 'Bush' -CompanyName 'Perfection Learning' -JobTitle 'IT' -Email1 'pbush@perfectionlearning.com' -EntryId 'internal-pat'),
+            (New-TestContactRecord -DisplayName 'Curriculum Team' -CompanyName 'Example School' -Email1 'curriculum@example.com' -EntryId 'external-curriculum' -DistributionListMembers @('One Member')),
+            (New-TestContactRecord -DisplayName 'Iowa Teacher' -FirstName 'Iowa' -LastName 'Teacher' -CompanyName 'State University' -Email1 'teacher@iowa.edu' -EntryId 'schools-iowa')
+        )
+
+        Write-ContactsHtmlReport -Records $records -PstItem $pstItem -ReportPath $contactsPath
+        $contactsHtml = Get-Content -LiteralPath $contactsPath -Raw
+
+        $folderOrder = [regex]::Match($contactsHtml, "(?s)id='contactsFolderInternal'.+id='contactsFolderExternal'.+id='contactsFolderSchools'")
+        $folderOrder.Success | Should -BeTrue -Because 'Folder labels must appear Internal, then External, then Schools'
+        $contactsHtml | Should -Match "id='contactsFolderInternal'[^>]*>Internal \(1\)"
+        $contactsHtml | Should -Match "id='contactsFolderExternal'[^>]*>External \(1\)"
+        $contactsHtml | Should -Match "id='contactsFolderSchools'[^>]*>Schools \(1\)"
+        $contactsHtml | Should -Match "data-audience='internal'[^>]*data-entry-id='internal-pat'|data-entry-id='internal-pat'[^>]*data-audience='internal'"
+        $contactsHtml | Should -Match "data-audience='external'[^>]*data-entry-id='external-curriculum'|data-entry-id='external-curriculum'[^>]*data-audience='external'"
+        $contactsHtml | Should -Match "data-audience='schools'[^>]*data-entry-id='schools-iowa'|data-entry-id='schools-iowa'[^>]*data-audience='schools'"
+        $contactsHtml | Should -Match 'My Contacts'
+        $contactsHtml | Should -Match "id='contactsPeopleList'"
+        $contactsHtml | Should -Match "id='contactsDetail'"
+        $contactsHtml | Should -Match "id='contactsFolderResizeHandle'"
+        $contactsHtml | Should -Match "id='contactsListResizeHandle'"
+        $contactsHtml | Should -Match 'contact-avatar'
+        $contactsHtml | Should -Match '>PB<'
+        $contactsHtml | Should -Not -Match "id='contactsFolderFilter'"
+        $contactsHtml | Should -Not -Match "id='contactsCategoryFilter'"
+    }
+
+    It 'omits empty attributes from the selected-contact card' {
+        $contactsPath = Join-Path $TestDrive 'sparse-contact-card.html'
+        $pstItem = [pscustomobject]@{ Name = 'Sparse PST.pst' }
+        $record = New-TestContactRecord -DisplayName 'Pat Bush' -FirstName 'Pat' -LastName 'Bush' `
+            -CompanyName 'Perfection Learning' -Email1 'pbush@perfectionlearning.com' -EntryId 'sparse-pat'
+
+        Write-ContactsHtmlReport -Records @($record) -PstItem $pstItem -ReportPath $contactsPath
+        $contactsHtml = Get-Content -LiteralPath $contactsPath -Raw
+
+        $contactsHtml | Should -Match "<div class='detail-label'>Organization</div>"
+        $contactsHtml | Should -Match "<div class='detail-label'>Email 1</div>"
+        $contactsHtml | Should -Match "<div class='detail-label'>First name</div>"
+        $contactsHtml | Should -Match "<div class='detail-label'>Last name</div>"
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Birthday</div>"
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Anniversary</div>"
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Home phone</div>"
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Email 2</div>"
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Job title</div>"
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Middle name</div>"
+        $contactsHtml | Should -Not -Match 'Distribution list members'
+        $contactsHtml | Should -Not -Match 'Attachment metadata'
+        $contactsHtml | Should -Not -Match 'Notes / body'
+        $contactsHtml | Should -Not -Match "<span class='empty'>\(none\)</span>"
+        $contactsHtml | Should -Not -Match '<em>\(empty\)</em>'
     }
 
     It 'writes sample calendar and contacts reports with dataset filters and typed outputs' {
@@ -163,35 +288,41 @@ Describe 'Calendar and contacts HTML reports' {
         $calendarHtml | Should -Not -Match 'items this month'
 
         $contactsHtml | Should -Match "id='contactsSearch'"
-        $contactsHtml | Should -Match "id='contactsFolderFilter'"
-        $contactsHtml | Should -Match "id='contactsCategoryFilter'"
-        $contactsHtml | Should -Match "id='contactsClearFiltersBtn'"
+        $contactsHtml | Should -Match "id='contactsFolderInternal'"
+        $contactsHtml | Should -Match "id='contactsFolderExternal'"
+        $contactsHtml | Should -Match "id='contactsFolderSchools'"
+        $contactsHtml | Should -Match "id='contactsPeopleList'"
+        $contactsHtml | Should -Match "id='contactsDetail'"
         $contactsHtml | Should -Match "id='contactsVisibleCount'"
+        $contactsHtml | Should -Match "id='contactsFolderResizeHandle'"
+        $contactsHtml | Should -Match "id='contactsListResizeHandle'"
         $contactsHtml | Should -Match "data-search='"
-        $contactsHtml | Should -Match "data-folder='"
+        $contactsHtml | Should -Match "data-audience='"
         $contactsHtml | Should -Match "data-categories='"
         $contactsHtml | Should -Match '\.dataset\.search'
-        $contactsHtml | Should -Match '\.dataset\.folder'
-        $contactsHtml | Should -Match '\.dataset\.categories'
+        $contactsHtml | Should -Match '\.dataset\.audience'
         $contactsHtml | Should -Match 'requestAnimationFrame|setTimeout'
         $contactsHtml | Should -Match 'content-visibility:\s*auto'
         $contactsHtml | Should -Match 'contain-intrinsic-size'
+        $contactsHtml | Should -Match 'My Contacts'
         $contactsHtml | Should -Match 'Organization'
         $contactsHtml | Should -Match 'Job title'
         $contactsHtml | Should -Match 'Department'
         $contactsHtml | Should -Match 'Website'
-        $contactsHtml | Should -Match 'Birthday'
-        $contactsHtml | Should -Match 'Anniversary'
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Birthday</div>"
+        $contactsHtml | Should -Not -Match "<div class='detail-label'>Anniversary</div>"
         $contactsHtml | Should -Match 'Distribution list members'
-        $contactsHtml | Should -Match 'Attachment metadata'
+        $contactsHtml | Should -Not -Match 'Attachment metadata'
         $contactsHtml | Should -Match 'Message class'
         $contactsHtml | Should -Match 'Entry ID'
         $contactsHtml | Should -Not -Match 'textContent\s*\|\|'
         $contactsHtml | Should -Not -Match '_searchText'
         $contactsHtml | Should -Not -Match "id='resizeHandle'"
-        $contactsLayoutOverride = [regex]::Match($contactsHtml, '(?s)@media\s*\(min-width:\s*901px\)\s*\{\s*\.review-layout\s*\{\s*grid-template-columns:\s*minmax\([^;]+\)\s+minmax\(0,\s*1fr\)[^}]*\}\s*\}')
-        $contactsLayoutOverride.Success | Should -BeTrue
-        $contactsLayoutOverride.Value | Should -Not -Match '10px'
+        $contactsHtml | Should -Not -Match "id='contactsFolderFilter'"
+        $contactsHtml | Should -Not -Match "id='contactsCategoryFilter'"
+        $contactsHtml | Should -Match 'contacts-shell'
+        $contactsHtml | Should -Match '--folder-pane-width'
+        $contactsHtml | Should -Match '--list-pane-width'
 
         $teamsHeader = $script:coreAst.Find({
             param($node)

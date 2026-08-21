@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calendar, and Contacts reports.
 
-**Current version:** 1.3.0.0
+**Current version:** 1.3.1.0
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -76,7 +76,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.3.0.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.3.1.0
 ```
 
 Outputs:
@@ -122,7 +122,7 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 - Email records are staged as UTF-8 NDJSON, imported into a temporary SQLite database, count-validated, then renamed into place.
 - Teams HTML supports participant/conversation text search plus date and sort filters.
 - Calendar HTML provides a navigable month grid, a scrollable chronological agenda of all matching meetings, and a sticky appointment detail pane. Agenda rows and month chips share selection; clicking an agenda item outside the visible month jumps the grid to that month. Search, date, folder, item-type, all-day, and recurring filters update both views.
-- Contacts HTML supports text search plus folder and category filters.
+- Contacts HTML uses an Outlook People layout with Internal, External, and Schools folders, text search, a people list, and a selected-contact card. Columns are resizable. The card shows only fields that have values.
 - Email Review Viewer provides SQLite FTS5 search, folder filtering, date filtering, sorting, paging, and on-demand message detail.
 - After a successful conversion, the GUI opens only `Base_Dashboard.html` in the default browser. The dashboard summarizes each report and links to it; every link opens in a new tab so the dashboard stays available. Nothing is launched after a failed or incomplete conversion.
 - Teams, Calendar, and Contacts open in the browser. Email opens through a `purview-email:` link, which the browser confirms once ("Open Email Review Viewer?") before starting the viewer with the `.db`. Producing an Email report registers that protocol for the current user only (`HKCU\Software\Classes\purview-email`), pointing at the resolved `EmailReviewViewer.App.exe`; the generated `Open-EmailReport.cmd` remains in the output folder as a fallback.
@@ -137,7 +137,13 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
 
-## Recent changes (version 1.3.0.0, 2026-08-06)
+## Recent changes (version 1.3.1.0, 2026-08-21)
+
+- Contacts HTML is an Outlook People view: My Contacts folders (Internal, External, Schools), a searchable people list with initials avatars, and a selected-contact card. Columns are resizable and remember their widths.
+- Contacts are classified from Email1/Email2/Email3. `perfectionlearning.com` is Internal, `.edu` is Schools, and everything else is External. Internal wins when both apply.
+- The selected-contact card omits empty attributes instead of showing `(none)`.
+
+## Earlier changes (version 1.3.0.0, 2026-08-06)
 
 - Every conversion writes `Base_Dashboard.html`, a landing page with one summary card per report produced and a link to open each one. The four cards sit two per row, each with its own accent color and icon, and each leads with the total for that report (messages, emails, appointments, or contacts) above the file name. Summary tiles across the top give items exported, reports produced, read warnings, and when the conversion ran, with the warning tile turning amber when there is anything to look at.
 - The GUI opens only the dashboard after a successful conversion and no longer has report checkboxes; all four reports always run. CLI report flags are unchanged.
