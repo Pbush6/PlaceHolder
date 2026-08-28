@@ -298,10 +298,88 @@ public static class TeamsReportHtml
           const clearAll = document.getElementById('clearAll');
           const layout = document.querySelector('.review-layout');
           const resizeHandle = document.getElementById('resizeHandle');
+          const conversationList = document.getElementById('conversationList');
+          const conversations = Array.from(document.querySelectorAll('.conversation'));
+          const resultCount = document.getElementById('resultCount');
           let debounce = null;
           let posting = false;
 
+          conversations.forEach(conversation => {
+            conversation._searchText = (conversation.textContent || '').replace(/\s+/g, ' ').toLowerCase();
+          });
+
           function selectedPeople() { return checks.filter(c => c.checked).map(c => c.value); }
+          function listFromDataset(conversation, name) { return (conversation.dataset[name] || '').split('||').map(v => v.trim()).filter(Boolean); }
+          function participantList(conversation) { return listFromDataset(conversation, 'participants'); }
+          function messageSender(message) { return (message.dataset.sender || '').trim(); }
+          function messageDate(message) { return (message.dataset.date || '').trim(); }
+          function messageInDateRange(message, startDate, endDate) {
+            const date = messageDate(message);
+            if (!date) return true;
+            if (startDate && date < startDate) return false;
+            if (endDate && date > endDate) return false;
+            return true;
+          }
+          function matchesSelectedSender(message, selected) { return selected.length === 0 || selected.includes(messageSender(message)); }
+          function containsAll(actual, selected) { return selected.every(p => actual.includes(p)); }
+          function sameSet(actual, selected) { return containsAll(actual, selected) && actual.length === selected.length; }
+          function matchesParticipantMode(conversation, selected, mode) {
+            if (selected.length === 0) return true;
+            const allParticipants = participantList(conversation);
+            const personParticipants = listFromDataset(conversation, 'personParticipants');
+            if (mode === 'involving') return containsAll(allParticipants, selected);
+            if (mode === 'exactAll') return sameSet(allParticipants, selected);
+            if (mode === 'exactPeopleOnly') {
+              const selectedPeopleOnly = selected.filter(p => personParticipants.includes(p));
+              return containsAll(allParticipants, selected) && sameSet(personParticipants, selectedPeopleOnly);
+            }
+            return true;
+          }
+          function sortConversations() {
+            if (!conversationList || !sortOrder) return;
+            const order = sortOrder.value || 'newestFirst';
+            const sorted = conversations.slice().sort((a, b) => {
+              const aTime = Date.parse(a.dataset.sortTime || '') || 0;
+              const bTime = Date.parse(b.dataset.sortTime || '') || 0;
+              return order === 'oldestFirst' ? aTime - bTime : bTime - aTime;
+            });
+            sorted.forEach(conversation => conversationList.appendChild(conversation));
+          }
+          function applyFilters() {
+            const selected = selectedPeople();
+            const mode = participantMatchMode ? participantMatchMode.value : 'messagesFromSelected';
+            const startDate = startDateFilter ? startDateFilter.value : '';
+            const endDate = endDateFilter ? endDateFilter.value : '';
+            const text = (messageSearch ? messageSearch.value : '').trim().toLowerCase();
+            let visibleConversations = 0;
+            let visibleMessages = 0;
+            conversations.forEach(conversation => {
+              const conversationTextOk = !text || (conversation._searchText || '').includes(text);
+              const messages = Array.from(conversation.querySelectorAll('.message-card'));
+              let conversationVisibleMessages = 0;
+              if (mode === 'messagesFromSelected') {
+                messages.forEach(message => {
+                  const showMessage = conversationTextOk && messageInDateRange(message, startDate, endDate) && matchesSelectedSender(message, selected);
+                  message.hidden = !showMessage;
+                  if (showMessage) conversationVisibleMessages += 1;
+                });
+              } else {
+                const showConversation = conversationTextOk && matchesParticipantMode(conversation, selected, mode);
+                messages.forEach(message => {
+                  const showMessage = showConversation && messageInDateRange(message, startDate, endDate);
+                  message.hidden = !showMessage;
+                  if (showMessage) conversationVisibleMessages += 1;
+                });
+              }
+              const showConversation = conversationVisibleMessages > 0;
+              const countEl = conversation.querySelector('.conversation-count');
+              if (countEl) countEl.textContent = (selected.length > 0 || text) ? (conversationVisibleMessages + ' of ' + messages.length + ' messages') : (messages.length + ' messages');
+              conversation.hidden = !showConversation;
+              if (showConversation) { visibleConversations += 1; visibleMessages += conversationVisibleMessages; }
+            });
+            sortConversations();
+            if (resultCount) resultCount.textContent = visibleConversations + ' conversations / ' + visibleMessages + ' messages shown';
+          }
           function post(message) {
             if (!window.chrome || !window.chrome.webview) return;
             posting = true;
@@ -372,16 +450,17 @@ public static class TeamsReportHtml
             const group = document.getElementById(groupId);
             if (!group) return;
             group.querySelectorAll('.person-check').forEach(c => { c.checked = selectAllCheckbox.checked; });
+            applyFilters();
             postQuery();
           }
 
-          checks.forEach(c => c.addEventListener('change', scheduleQuery));
+          checks.forEach(c => c.addEventListener('change', () => { applyFilters(); scheduleQuery(); }));
           if (personSearch) personSearch.addEventListener('input', filterPersonList);
-          if (messageSearch) messageSearch.addEventListener('input', scheduleQuery);
-          if (participantMatchMode) participantMatchMode.addEventListener('change', postQuery);
-          if (startDateFilter) startDateFilter.addEventListener('change', postQuery);
-          if (endDateFilter) endDateFilter.addEventListener('change', postQuery);
-          if (sortOrder) sortOrder.addEventListener('change', postQuery);
+          if (messageSearch) messageSearch.addEventListener('input', () => { applyFilters(); scheduleQuery(); });
+          if (participantMatchMode) participantMatchMode.addEventListener('change', () => { applyFilters(); postQuery(); });
+          if (startDateFilter) startDateFilter.addEventListener('change', () => { applyFilters(); postQuery(); });
+          if (endDateFilter) endDateFilter.addEventListener('change', () => { applyFilters(); postQuery(); });
+          if (sortOrder) sortOrder.addEventListener('change', () => { applyFilters(); postQuery(); });
           if (selectAllPeople) selectAllPeople.addEventListener('change', () => setGroupChecked(selectAllPeople, 'peopleBox'));
           if (selectAllOther) selectAllOther.addEventListener('change', () => setGroupChecked(selectAllOther, 'otherPeopleBox'));
           if (clearAll) clearAll.addEventListener('click', () => {
@@ -395,6 +474,7 @@ public static class TeamsReportHtml
             if (personSearch) personSearch.value = '';
             if (messageSearch) messageSearch.value = '';
             filterPersonList();
+            applyFilters();
             postQuery();
           });
           const previousPage = document.getElementById('previousPage');
@@ -405,6 +485,7 @@ public static class TeamsReportHtml
           if (openDatabase) openDatabase.addEventListener('click', () => post({ action: 'openDatabase' }));
           setupColumnResize();
           filterPersonList();
+          applyFilters();
         })();
         """;
 }

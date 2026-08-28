@@ -32,7 +32,6 @@ public sealed class TeamsReviewForm : Form
     private int _pageIndex;
     private long _conversationCount;
     private bool _webViewReady;
-    private bool _loadingPage;
 
     public TeamsReviewForm(string? databasePath)
     {
@@ -119,9 +118,6 @@ public sealed class TeamsReviewForm : Form
             await ChooseDatabaseAsync();
             return;
         }
-
-        if (_loadingPage)
-            return;
 
         if (message?.Action == "page")
         {
@@ -217,7 +213,6 @@ public sealed class TeamsReviewForm : Form
         _pageLoadCancellation?.Dispose();
         _pageLoadCancellation = new CancellationTokenSource();
         var cancellationToken = _pageLoadCancellation.Token;
-        _loadingPage = true;
         try
         {
             var query = BuildQuery();
@@ -243,10 +238,6 @@ public sealed class TeamsReviewForm : Form
         catch (Exception exception)
         {
             MessageBox.Show(this, exception.Message, "Teams Review Viewer", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally
-        {
-            _loadingPage = false;
         }
     }
 

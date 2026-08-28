@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calendar, and Contacts reports.
 
-**Current version:** 1.4.1.0
+**Current version:** 1.4.2.0
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -77,7 +77,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.4.1.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.4.2.0
 ```
 
 Outputs:
@@ -139,7 +139,12 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
 
-## Recent changes (version 1.4.1.0, 2026-08-28)
+## Recent changes (version 1.4.2.0, 2026-08-28)
+
+- Teams person checkboxes filter the loaded conversation cards immediately, then refresh from SQLite so large databases stay in sync.
+- Involving and exact-match modes count every participant in a conversation, not only the first sender’s roster.
+
+## Earlier changes (version 1.4.1.0, 2026-08-28)
 
 - Teams Review Viewer renders the original Teams HTML report in WebView2 (same CSS, conversation cards, and message cards), with **Open Database…** in the hero.
 - Large Teams pages are written to a local HTML file instead of `NavigateToString`, which is capped at 2 MB.

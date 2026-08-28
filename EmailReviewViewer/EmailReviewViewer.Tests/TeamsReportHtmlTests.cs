@@ -54,6 +54,18 @@ public sealed class TeamsReportHtmlTests
     }
 
     [Fact]
+    public void Script_filters_loaded_conversations_in_the_browser_before_asking_the_host()
+    {
+        var html = TeamsReportHtml.Build(SampleModel());
+
+        Assert.Contains("function applyFilters()", html);
+        Assert.Contains("message.hidden = !showMessage", html);
+        Assert.Contains("conversation.hidden = !showConversation", html);
+        Assert.Contains("applyFilters(); scheduleQuery();", html);
+        Assert.Contains("c.addEventListener('change'", html);
+    }
+
+    [Fact]
     public void WriteReport_persists_html_larger_than_the_WebView2_NavigateToString_limit()
     {
         var hugeBody = new string('x', 2 * 1024 * 1024);

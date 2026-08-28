@@ -2,6 +2,13 @@
 
 Generated: 2026-07-03
 
+## Version 1.4.2.0 packaging (2026-08-28)
+
+- Teams person filter applies immediately on the loaded cards (same as the HTML report), then refreshes from SQLite.
+- Involving/exact match unions participants across all senders in a conversation.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.4.2.0-win-x64.zip`.
+- ZIP SHA-256: `C0AF9AF5295759D9596165CE741338ADBB7366D736F63C3BBBAD46B959251B84`.
+
 ## Version 1.4.1.0 packaging (2026-08-28)
 
 - Teams viewer renders the original Teams HTML stylesheet in WebView2, with an Open Database button in the hero.

@@ -66,6 +66,40 @@ public sealed class TeamsRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task Involving_keeps_a_conversation_when_the_selected_person_is_only_on_later_messages()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"teams-split-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var repository = new TeamsRepository(databasePath);
+            await repository.EnsureCreatedAsync();
+            await repository.InsertBatchAsync(
+            [
+                Message(1, "chat-split", "Split roster", "Alice Amber", "Hi.",
+                    @"SamplePst\TeamsMessagesData", "Alice Amber", new DateTime(2024, 1, 1, 9, 0, 0, DateTimeKind.Utc), ""),
+                Message(2, "chat-split", "Split roster", "Bob Baker", "Hello.",
+                    @"SamplePst\TeamsMessagesData", "Alice Amber||Bob Baker", new DateTime(2024, 1, 1, 9, 1, 0, DateTimeKind.Utc), "")
+            ]);
+
+            var page = await repository.SearchConversationsAsync(new TeamsQuery(
+                SelectedParticipants: ["Bob Baker"],
+                MatchMode: TeamsParticipantMatchMode.Involving,
+                Limit: 50));
+
+            var chat = Assert.Single(page.Items);
+            Assert.Equal("Split roster", chat.ConversationTitle);
+            Assert.Contains("Bob Baker", chat.Participants);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var candidate in new[] { databasePath, databasePath + "-wal", databasePath + "-shm" })
+                if (File.Exists(candidate))
+                    File.Delete(candidate);
+        }
+    }
+
+    [Fact]
     public async Task Exact_selected_people_only_keeps_conversations_with_the_same_participant_set()
     {
         using var repository = await CreateSeededRepositoryAsync();

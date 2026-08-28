@@ -202,14 +202,17 @@ public sealed class TeamsRepository(string databasePath) : IDisposable
         while (await reader.ReadAsync(cancellationToken))
         {
             var key = reader.GetString(0);
+            var rowParticipants = reader.IsDBNull(2) ? "" : reader.GetString(2);
             if (!grouped.TryGetValue(key, out var aggregate))
             {
                 aggregate = new ConversationAggregate(
                     key,
                     reader.IsDBNull(1) ? "" : reader.GetString(1),
-                    reader.IsDBNull(2) ? "" : reader.GetString(2));
+                    rowParticipants);
                 grouped[key] = aggregate;
             }
+            else
+                aggregate.AddParticipants(rowParticipants);
             var sender = reader.IsDBNull(3) ? "" : reader.GetString(3);
             var count = reader.GetInt64(4);
             aggregate.AddSender(sender, count, ReadDate(reader, 5));
@@ -345,17 +348,33 @@ public sealed class TeamsRepository(string databasePath) : IDisposable
         CcRecipients = reader.FieldCount > 17 && !reader.IsDBNull(17) ? reader.GetString(17) : ""
     };
 
-    private sealed class ConversationAggregate(
-        string conversationKey,
-        string conversationTitle,
-        string participants)
+    private sealed class ConversationAggregate
     {
-        public string ConversationKey { get; } = conversationKey;
-        public string ConversationTitle { get; } = conversationTitle;
-        public string Participants { get; } = participants;
+        public string ConversationKey { get; }
+        public string ConversationTitle { get; }
         public DateTime? LastUtc { get; private set; }
         public long TotalCount { get; private set; }
+        private readonly List<string> _participantNames = [];
+        private readonly HashSet<string> _participantSet = new(StringComparer.Ordinal);
         private readonly Dictionary<string, long> _senderCounts = new(StringComparer.Ordinal);
+
+        public string Participants => string.Join("||", _participantNames);
+
+        public ConversationAggregate(string conversationKey, string conversationTitle, string participants)
+        {
+            ConversationKey = conversationKey;
+            ConversationTitle = conversationTitle;
+            AddParticipants(participants);
+        }
+
+        public void AddParticipants(string value)
+        {
+            foreach (var name in TeamsParticipantMatching.Split(value))
+            {
+                if (_participantSet.Add(name))
+                    _participantNames.Add(name);
+            }
+        }
 
         public void AddSender(string sender, long count, DateTime? lastUtc)
         {
