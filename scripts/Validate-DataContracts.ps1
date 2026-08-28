@@ -53,9 +53,10 @@ try {
     $reportBase = [IO.Path]::Combine([IO.Path]::GetDirectoryName($report), [IO.Path]::GetFileNameWithoutExtension($report))
     $logBase = [IO.Path]::Combine([IO.Path]::GetDirectoryName($log), [IO.Path]::GetFileNameWithoutExtension($log))
     $generatedPaths = @(
-        "${reportBase}_Teams.html", "${reportBase}_Email.db", "${reportBase}_Calendar.html", "${reportBase}_Contacts.html",
+        "${reportBase}_Teams.db", "${reportBase}_Email.db", "${reportBase}_Calendar.html", "${reportBase}_Contacts.html",
         "${reportBase}_Dashboard.html",
         (Join-Path ([IO.Path]::GetDirectoryName($report)) 'Open-EmailReport.cmd'),
+        (Join-Path ([IO.Path]::GetDirectoryName($report)) 'Open-TeamsReport.cmd'),
         "${logBase}_Teams.log", "${logBase}_Email.log", "${logBase}_Calendar.log", "${logBase}_Contacts.log"
     )
     $runId = [guid]::NewGuid().ToString('N')
@@ -80,7 +81,7 @@ try {
     if ($result -notmatch 'EmailItemsExported=2') { throw 'CONVERSION_RESULT missing expected EmailItemsExported=2' }
     if ($result -notmatch 'CalendarItemsExported=1') { throw 'CONVERSION_RESULT missing expected CalendarItemsExported=1' }
     if ($result -notmatch 'ContactsItemsExported=1') { throw 'CONVERSION_RESULT missing expected ContactsItemsExported=1' }
-    if ($result -notmatch 'TeamsOutputPath=.*_Teams\.html') { throw 'CONVERSION_RESULT missing expected TeamsOutputPath' }
+    if ($result -notmatch 'TeamsOutputPath=.*_Teams\.db') { throw 'CONVERSION_RESULT missing expected TeamsOutputPath' }
     if ($result -notmatch 'EmailOutputPath=.*_Email\.db') { throw 'CONVERSION_RESULT missing expected EmailOutputPath' }
     if ($result -notmatch 'CalendarOutputPath=.*_Calendar\.html') { throw 'CONVERSION_RESULT missing expected CalendarOutputPath' }
     if ($result -notmatch 'ContactsOutputPath=.*_Contacts\.html') { throw 'CONVERSION_RESULT missing expected ContactsOutputPath' }

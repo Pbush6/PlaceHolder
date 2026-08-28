@@ -7,6 +7,7 @@ namespace EmailReviewViewer.App;
 public static class DatabaseArgument
 {
     public const string ProtocolScheme = "purview-email:";
+    public const string TeamsProtocolScheme = "purview-teams:";
 
     public static string Resolve(string argument)
     {
@@ -14,15 +15,20 @@ public static class DatabaseArgument
             throw new ArgumentException("A database path is required.", nameof(argument));
 
         var value = argument.Trim();
-        if (value.StartsWith(ProtocolScheme, StringComparison.OrdinalIgnoreCase))
-        {
-            value = value[ProtocolScheme.Length..].TrimEnd('/');
-            value = Uri.UnescapeDataString(value);
-        }
+        value = StripScheme(value, ProtocolScheme);
+        value = StripScheme(value, TeamsProtocolScheme);
 
         if (string.IsNullOrWhiteSpace(value))
             throw new ArgumentException("A database path is required.", nameof(argument));
 
         return Path.GetFullPath(value);
+    }
+
+    private static string StripScheme(string value, string scheme)
+    {
+        if (!value.StartsWith(scheme, StringComparison.OrdinalIgnoreCase))
+            return value;
+        value = value[scheme.Length..].TrimEnd('/');
+        return Uri.UnescapeDataString(value);
     }
 }

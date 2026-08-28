@@ -735,6 +735,14 @@ public sealed class MainForm : Form
         _openDatabase.Enabled = false;
         try
         {
+            var kind = await ReportDatabaseKindDetector.DetectAsync(databasePath);
+            if (kind == ReportDatabaseKind.Teams)
+            {
+                ReportViewerSession.Request(databasePath);
+                Close();
+                return;
+            }
+
             await _store.SwitchAsync(databasePath);
             ResetReviewState();
             SetDatabaseLoadedState(true);

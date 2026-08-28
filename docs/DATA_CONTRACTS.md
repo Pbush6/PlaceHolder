@@ -1,7 +1,7 @@
 # Purview PST Reports — Data Contracts
 
-**Version:** 1.3.1.0
-**Last updated:** 2026-08-21
+**Version:** 1.4.1.0
+**Last updated:** 2026-08-28
 
 This document defines every machine-readable contract between the core converter, launcher, GUI, tests, and Curt memory system.
 
@@ -12,7 +12,7 @@ All lines are single-line, pipe-separated `Key=Value` fields. Optional `RunId=<3
 | Prefix | When emitted | Required fields |
 |--------|--------------|-----------------|
 | `CONVERSION_PROGRESS` | During PST scan | `ItemsAttempted`, `ItemsExported`, `FoldersScanned`, `ItemReadFailures`, `ElapsedSeconds`, `RatePerMinute`, `FolderPath` |
-| `CONVERSION_STAGE` | Report lifecycle | `Stage` (+ optional `Written`, `Total` for `WritingReport`); includes `ImportingEmailDatabase` |
+| `CONVERSION_STAGE` | Report lifecycle | `Stage` (+ optional `Written`, `Total` for `WritingReport`); includes `ImportingTeamsDatabase` and `ImportingEmailDatabase` |
 | `CONVERSION_RESULT` | Success only | Backward-compatible `OutputPath`, `LogPath`, `ItemsExported`, failure counters; typed `TeamsOutputPath`, `EmailOutputPath`, `CalendarOutputPath`, `ContactsOutputPath`, corresponding typed log paths, per-report exported counts, and a trailing `DashboardOutputPath` |
 | `CONVERSION_ERROR` | Fatal failure (before throw) | `ExitCode`, `Message` (max 500 chars, no CR/LF/pipes) |
 
@@ -50,7 +50,7 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 
 ## 4. Output report contracts
 
-**Teams report** required DOM markers: `participantMatchMode`, `startDateFilter`, `endDateFilter`, `sortOrder`, `conversation-toolbar`, `hero-credit` containing `By Patrick Bush`.
+**Teams report:** SQLite database named `Base_Teams.db`, with `TeamsMessages`, `TeamsMessagesFts`, indexes, and FTS maintenance triggers. The viewer lists conversations with the Teams HTML review filters (people, participant match mode, message search, date range, newest/oldest sort) and loads message cards for the current page only.
 
 **Email report:** SQLite database named `Base_Email.db`, with `EmailMessages`, `EmailMessagesFts`, indexes, and FTS maintenance triggers. The viewer pages metadata and loads a body only when selected.
 
@@ -60,21 +60,30 @@ Not serialized to JSON; shape produced by `Get-MessageRecord`:
 
 **Dashboard:** static HTML named `Base_Dashboard.html`, written on every successful run. It carries its own self-contained stylesheet (no external fonts, scripts, or images) rather than the report CSS. The header names the source PST, and four summary tiles report items exported (with folders scanned), reports produced, read warnings, and the generated timestamp; the warning tile turns amber when the item and attachment warning total is above zero, and keeps the `Items: n; Attachments: n` split as its detail line. Below that sits one `dashboard-card` per report produced, marked with `data-report='teams|email|calendar|contacts'` and `data-item-count` (raw, ungrouped). Cards are laid out two per row, each with its own accent color and inline SVG icon. Each card leads with a headline count labelled for that report (`Total messages`, `Total emails`, `Total appointments`, `Total contacts`) and ends with the output file name. Displayed counts are grouped with thousands separators; log file names are not shown. Cards are omitted for reports that were not produced. Links are file names relative to the dashboard, so the dashboard and its reports must stay in the same folder.
 
+**Teams launch protocol:** producing a Teams report registers `HKCU\Software\Classes\purview-teams` with `URL Protocol` and `shell\open\command` = `"<resolved viewer>" "%1"`, and the dashboard Teams card links to `purview-teams:<url-encoded absolute .db path>`. The viewer's `DatabaseArgument.Resolve` strips either `purview-teams:` or `purview-email:`. Registration failure is non-fatal: the core logs a warning and the card falls back to the launch helper.
+
+**Teams launch helper:** `Open-TeamsReport.cmd`, written beside the reports only when the Teams report is produced. It prefers `PURVIEW_TEAMS_VIEWER_PATH`, falls back to the viewer path resolved when the helper was generated, and reports the searched path and pauses when the viewer or `.db` is missing.
+
 **Email launch protocol:** producing an Email report registers `HKCU\Software\Classes\purview-email` with `URL Protocol` and `shell\open\command` = `"<resolved viewer>" "%1"`, and the dashboard Email card links to `purview-email:<url-encoded absolute .db path>`. The viewer's `DatabaseArgument.Resolve` strips the scheme, unescapes, and treats the remainder as the database path. Registration failure is non-fatal: the core logs a warning and the card falls back to the launch helper.
 
 **Email launch helper:** `Open-EmailReport.cmd`, written beside the reports only when the Email report is produced, as the fallback path when the protocol is unavailable or blocked. It prefers `PURVIEW_EMAIL_VIEWER_PATH`, falls back to the viewer path resolved when the helper was generated, and reports the searched path and pauses when the viewer or `.db` is missing.
 
 All user-controlled text passes `ConvertTo-HtmlEncodedText`.
 
-## 5. Email NDJSON import
+## 5. Email and Teams NDJSON import
 
-UTF-8 without BOM, one JSON object per physical line. Required data fields are `FolderPath`, `SenderName`, `SenderAddress`, `ToRecipients`, `CcRecipients`, `Subject`, `SentUtc`, `ReceivedUtc`, `Preview`, `BodyText`, `MessageClass`, `EntryId`, `ConversationId`, and `ConversationTopic`.
+UTF-8 without BOM, one JSON object per physical line.
+
+**Email** required data fields are `FolderPath`, `SenderName`, `SenderAddress`, `ToRecipients`, `CcRecipients`, `Subject`, `SentUtc`, `ReceivedUtc`, `Preview`, `BodyText`, `MessageClass`, `EntryId`, `ConversationId`, and `ConversationTopic`.
+
+**Teams** required data fields are `FolderPath`, `SenderName`, `SenderAddress`, `SenderDisplay`, `Participants`, `ConversationKey`, `ConversationTitle`, `Subject`, `SentUtc`, `ReceivedUtc`, `Preview`, `BodyText`, `MessageClass`, `EntryId`, `AttachmentsText`, `ToRecipients`, and `CcRecipients`. `Participants` is `||`-joined. `AttachmentsText` is plain attachment names stripped from `AttachmentsHtml`.
 
 - Date values are ISO-8601 with timezone offset and are normalized to UTC by the importer.
 - Preview is the first non-empty body line, bounded to 500 characters.
 - `EntryId` is the unique duplicate key; missing values receive a deterministic SHA-256 fallback.
 - Import writes `<output>.importing`, validates final row count, then replaces the destination.
 - Staging NDJSON is removed only after importer exit code 0; failures log and retain its exact path.
+- The viewer import command is `--import <ndjson> --database <path> --kind teams|email --expected-count <n>`; `email` remains the default kind.
 - Email attachment summaries remain deferred in 1.2.0.0.
 
 ## 6. Launcher ↔ child process
@@ -108,12 +117,12 @@ typed logs, and their summary content.
 
 | Source | Expected |
 |--------|----------|
-| `build.ps1` default | `1.3.1.0` |
-| `README.md` | `1.3.1.0` |
-| Email Reviewer assembly/file version | `1.3.1.0` |
-| Pester build and release tests | `1.3.1.0` |
+| `build.ps1` default | `1.4.1.0` |
+| `README.md` | `1.4.1.0` |
+| Email Reviewer assembly/file version | `1.4.1.0` |
+| Pester build and release tests | `1.4.1.0` |
 
-Release 1.3.1.0 is aligned across source defaults, documentation, executable metadata, package naming, and release verification.
+Release 1.4.1.0 is aligned across source defaults, documentation, executable metadata, package naming, and release verification.
 
 ## Validation
 

@@ -38,7 +38,7 @@
         "RunId": { "$ref": "#/$defs/runId" },
         "Stage": {
           "type": "string",
-          "enum": ["FinishedReading", "PreparingReport", "WritingReport", "Finalizing", "ImportingEmailDatabase", "Detaching", "ReportWritten"]
+          "enum": ["FinishedReading", "PreparingReport", "WritingReport", "Finalizing", "ImportingTeamsDatabase", "ImportingEmailDatabase", "Detaching", "ReportWritten"]
         },
         "Written": { "type": "integer", "minimum": 0 },
         "Total": { "type": "integer", "minimum": 0 }

@@ -166,15 +166,16 @@ QUICK START
 
 OUTPUTS
 - Dashboard: <name>_Dashboard.html
-- Teams report: <name>_Teams.html
+- Teams report: <name>_Teams.db
 - Email database: <name>_Email.db
 - Calendar report: <name>_Calendar.html
 - Contacts report: <name>_Contacts.html
 - Logs: matching _Teams.log, _Email.log, _Calendar.log, and _Contacts.log files
 - The dashboard opens automatically after conversion. Open individual reports
   from its color-coded report cards.
-- Email opens in the bundled Email Review Viewer through the `purview-email:`
-  link. Your browser may ask for confirmation the first time.
+- Teams and Email open in the bundled Email Review Viewer through the
+  `purview-teams:` and `purview-email:` links. Your browser may ask for
+  confirmation the first time.
 
 To review an existing Email database, run
 EmailReviewViewer\EmailReviewViewer.App.exe and choose File > Open Database.
@@ -219,10 +220,18 @@ EmailReviewViewer folder.
   statistics and a responsive 2x2 grid of report cards.
 - The GUI always generates Teams, Email, Calendar, and Contacts in one PST scan;
   CLI automation can still request any subset.
-- Dashboard links open Teams, Calendar, and Contacts in new browser tabs.
-- Email opens in the bundled Email Review Viewer through a current-user
-  `purview-email:` protocol handler; `Open-EmailReport.cmd` is retained as a
-  fallback.
+- Teams reports are SQLite databases opened in Email Review Viewer with the same
+  people filters, match modes, conversation cards, and message cards as the
+  former Teams HTML report. The viewer uses that HTML stylesheet in WebView2
+  (Edge WebView2 Runtime; already present on most Windows 10/11 PCs).
+- Dashboard links open Calendar and Contacts in new browser tabs.
+- Teams and Email open in the bundled Email Review Viewer through current-user
+  `purview-teams:` and `purview-email:` protocol handlers; `Open-TeamsReport.cmd`
+  and `Open-EmailReport.cmd` are retained as fallbacks.
+- When outputs would be saved in Downloads, they go in a subfolder named after
+  the PST file. Custom folders other than Downloads are left unchanged.
+- The GUI states that a dashboard will launch with links to Email, Teams,
+  Contacts, and Calendar reports when processing is complete.
 - Contacts HTML is an Outlook People view grouped Internal, External, and
   Schools. The selected-contact card omits empty attributes.
 - Calendar HTML provides a month grid, chronological agenda, and appointment
@@ -233,7 +242,8 @@ EmailReviewViewer folder.
 - Email Review Viewer includes Patrick's bottom-right `By Patrick Bush` credit.
 
 ## Prerequisites and caveats
-- Converter requires Windows 10/11 x64, PowerShell 7, and classic Outlook COM.
+- Converter requires Windows 10/11 x64, PowerShell 7, classic Outlook COM, and
+  Edge WebView2 Runtime for the Teams report.
 - Close Outlook before conversion.
 - Executables are not code-signed; Windows SmartScreen may show an internal-app
   warning. Verify `checksums.sha256` when transferring this package.

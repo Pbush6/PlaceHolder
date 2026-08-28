@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calendar, and Contacts reports.
 
-**Current version:** 1.3.1.0
+**Current version:** 1.4.1.0
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -10,7 +10,7 @@ Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calend
 - Temporarily attaches a PST via Outlook COM and scans it once.
 - Produces all four report types in one PST scan; the GUI has no report selection.
 - Writes `Base_Dashboard.html`, a landing page that summarizes every report produced and links to each one.
-- Writes Teams items to `Base_Teams.html`.
+- Writes Teams items to `Base_Teams.db` and opens them in Email Review Viewer with the same conversation filters and message-card layout as the former Teams HTML report.
 - Writes Email items to `Base_Email.db`; Email HTML is no longer generated.
 - Writes appointments and meetings to `Base_Calendar.html` with a month grid, chronological agenda, and synchronized detail pane.
 - Writes contacts and distribution lists to `Base_Contacts.html`.
@@ -27,6 +27,7 @@ Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calend
 - Windows 10/11
 - Classic Microsoft Outlook (installed and registered for COM; new Outlook alone is not supported)
 - PowerShell 7 (`pwsh`)
+- Edge WebView2 Runtime for the Teams report (included with Microsoft Edge on most Windows 10/11 PCs)
 - .NET 8 Desktop Runtime for development/framework-dependent viewer builds only; the portable deployment package includes a self-contained viewer
 - PS2EXE (for building EXEs): `Install-Module ps2exe -Scope CurrentUser`
 
@@ -76,7 +77,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.3.1.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.4.1.0
 ```
 
 Outputs:
@@ -118,14 +119,15 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 
 - The GUI always generates Teams, Email, Calendar, and Contacts; it no longer has report checkboxes.
 - `-NoGui` and direct core calls keep `-TeamsReport`, `-EmailReport`, `-CalendarReport`, and `-ContactsReport` for automation. Any subset may be requested; only those reports and logs are written, and the dashboard lists only what was produced. If all four are false, the core exits with `CONVERSION_ERROR`.
-- The shared base path produces `_Teams.html`, `_Email.db`, `_Calendar.html`, `_Contacts.html`, and `_Dashboard.html`, plus one typed `.log` file for each report produced.
+- The shared base path produces `_Teams.db`, `_Email.db`, `_Calendar.html`, `_Contacts.html`, and `_Dashboard.html`, plus one typed `.log` file for each report produced.
+- When those files would be saved in the user's Downloads folder, they go in a new subfolder named after the PST file (for example `Downloads\lhaltom@perfectionlearning.com.001\`). A custom folder other than Downloads is left unchanged.
 - Email records are staged as UTF-8 NDJSON, imported into a temporary SQLite database, count-validated, then renamed into place.
-- Teams HTML supports participant/conversation text search plus date and sort filters.
+- Teams records use the same NDJSON import path into `_Teams.db`. The Teams viewer renders the original Teams HTML report (same CSS, layout, conversation cards, and message cards) inside WebView2, and pages conversations from SQLite so large PSTs stay responsive.
 - Calendar HTML provides a navigable month grid, a scrollable chronological agenda of all matching meetings, and a sticky appointment detail pane. Agenda rows and month chips share selection; clicking an agenda item outside the visible month jumps the grid to that month. Search, date, folder, item-type, all-day, and recurring filters update both views.
 - Contacts HTML uses an Outlook People layout with Internal, External, and Schools folders, text search, a people list, and a selected-contact card. Columns are resizable. The card shows only fields that have values.
 - Email Review Viewer provides SQLite FTS5 search, folder filtering, date filtering, sorting, paging, and on-demand message detail.
 - After a successful conversion, the GUI opens only `Base_Dashboard.html` in the default browser. The dashboard summarizes each report and links to it; every link opens in a new tab so the dashboard stays available. Nothing is launched after a failed or incomplete conversion.
-- Teams, Calendar, and Contacts open in the browser. Email opens through a `purview-email:` link, which the browser confirms once ("Open Email Review Viewer?") before starting the viewer with the `.db`. Producing an Email report registers that protocol for the current user only (`HKCU\Software\Classes\purview-email`), pointing at the resolved `EmailReviewViewer.App.exe`; the generated `Open-EmailReport.cmd` remains in the output folder as a fallback.
+- Teams and Email open through `purview-teams:` and `purview-email:` links, which the browser confirms once before starting the viewer with the `.db`. Producing those reports registers the protocols for the current user only (`HKCU\Software\Classes\purview-teams` and `purview-email`), pointing at the resolved `EmailReviewViewer.App.exe`; `Open-TeamsReport.cmd` and `Open-EmailReport.cmd` remain in the output folder as fallbacks. Calendar and Contacts open in the browser.
 - **Open Report** in the GUI reopens the dashboard when it exists and otherwise falls back to the individual reports.
 - In Email Review Viewer, use **File > Open Database…** or the **Open Database…** button to open or switch `.db` files. Invalid, corrupt, and incompatible databases are rejected without replacing the current database.
 
@@ -137,7 +139,24 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
 
-## Recent changes (version 1.3.1.0, 2026-08-21)
+## Recent changes (version 1.4.1.0, 2026-08-28)
+
+- Teams Review Viewer renders the original Teams HTML report in WebView2 (same CSS, conversation cards, and message cards), with **Open Database…** in the hero.
+- Large Teams pages are written to a local HTML file instead of `NavigateToString`, which is capped at 2 MB.
+- Conversations are paged from SQLite so large PSTs stay responsive.
+
+## Earlier changes (version 1.4.0.0, 2026-08-28)
+
+- Teams reports are SQLite databases (`_Teams.db`) opened in Email Review Viewer using the original Teams HTML report stylesheet (Segoe UI, navy gradient hero, rounded conversation and message cards). Conversations are paged from SQLite so large PSTs stay responsive.
+- Dashboard Teams cards use `purview-teams:` like Email, with `Open-TeamsReport.cmd` as the fallback.
+- Large Teams exports stay responsive because conversations are paged and loaded from SQLite instead of one HTML file.
+
+## Earlier changes (version 1.3.2.0, 2026-08-27)
+
+- When conversion outputs would be saved in Downloads, they go in a new folder named after the PST file. A custom folder other than Downloads is left unchanged.
+- The GUI label now says a dashboard will launch with links to Email, Teams, Contacts, and Calendar reports when processing is complete.
+
+## Earlier changes (version 1.3.1.0, 2026-08-21)
 
 - Contacts HTML is an Outlook People view: My Contacts folders (Internal, External, Schools), a searchable people list with initials avatars, and a selected-contact card. Columns are resizable and remember their widths.
 - Contacts are classified from Email1/Email2/Email3. `perfectionlearning.com` is Internal, `.edu` is Schools, and everything else is External. Internal wins when both apply.

@@ -19,7 +19,7 @@ if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $logPath = [IO.Path]::GetFullPath($LogPath)
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($logPath))
 }
-$teamsReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Teams.html'
+$teamsReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Teams.db'
 $emailReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Email.db'
 $calendarReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Calendar.html'
 $contactsReportPath = Join-Path $outputDirectory 'verify-stop-process-tree_Contacts.html'

@@ -63,7 +63,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $emailLogPath = Join-Path $TestDrive 'all-four_Email.log'
         $calendarLogPath = Join-Path $TestDrive 'all-four_Calendar.log'
         $contactsLogPath = Join-Path $TestDrive 'all-four_Contacts.log'
-        $teamsReportPath = Join-Path $TestDrive 'all-four_Teams.html'
+        $teamsReportPath = Join-Path $TestDrive 'all-four_Teams.db'
         $emailReportPath = Join-Path $TestDrive 'all-four_Email.db'
         $calendarReportPath = Join-Path $TestDrive 'all-four_Calendar.html'
         $contactsReportPath = Join-Path $TestDrive 'all-four_Contacts.html'
@@ -80,7 +80,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $result.StdOut | Should -Match 'EmailItemsExported=2'
         $result.StdOut | Should -Match 'CalendarItemsExported=1'
         $result.StdOut | Should -Match 'ContactsItemsExported=1'
-        $result.StdOut | Should -Match 'TeamsOutputPath=.*_Teams\.html'
+        $result.StdOut | Should -Match 'TeamsOutputPath=.*_Teams\.db'
         $result.StdOut | Should -Match 'EmailOutputPath=.*_Email\.db'
         $result.StdOut | Should -Match 'CalendarOutputPath=.*_Calendar\.html'
         $result.StdOut | Should -Match 'ContactsOutputPath=.*_Contacts\.html'
@@ -109,7 +109,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
 
         $result.ExitCode | Should -Be 0
         $result.StdOut | Should -Match 'ItemsExported=4'
-        (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-core_Teams.html')) | Should -BeTrue
+        (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-core_Teams.db')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-core_Email.db')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-core_Calendar.html')) | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-core_Contacts.html')) | Should -BeFalse
@@ -125,7 +125,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
 
         $result.ExitCode | Should -Be 0
         $result.StdOut | Should -Match 'ItemsExported=2'
-        (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-launcher_Teams.html')) | Should -BeTrue
+        (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-launcher_Teams.db')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-launcher_Email.db')) | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-launcher_Calendar.html')) | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $TestDrive 'legacy-launcher_Contacts.html')) | Should -BeFalse
@@ -134,7 +134,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
     It 'runs the core sample path successfully with Teams only' {
         $reportPath = Join-Path $TestDrive 'teams-only.html'
         $logPath = Join-Path $TestDrive 'teams-only.log'
-        $teamsReportPath = Join-Path $TestDrive 'teams-only_Teams.html'
+        $teamsReportPath = Join-Path $TestDrive 'teams-only_Teams.db'
         $teamsLogPath = Join-Path $TestDrive 'teams-only_Teams.log'
         $result = & $script:invokePwshScriptCapture -FilePath $script:corePath -Arguments @('-UseSampleData', '-NoPrompt', '-TeamsReport:$true', '-EmailReport:$false', '-CalendarReport:$false', '-ContactsReport:$false', '-OutputPath', $reportPath, '-LogPath', $logPath)
 
@@ -144,7 +144,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $result.StdOut | Should -Match 'CONVERSION_RESULT\|'
         $result.StdOut | Should -Match 'ItemsExported=2'
         $result.StdOut | Should -Match 'TeamsItemsExported=2'
-        $result.StdOut | Should -Match 'TeamsOutputPath=.*_Teams\.html'
+        $result.StdOut | Should -Match 'TeamsOutputPath=.*_Teams\.db'
         $result.StdOut | Should -Match 'TeamsLogPath=.*_Teams\.log'
         (Test-Path -LiteralPath (Join-Path $TestDrive 'teams-only_Email.db')) | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $TestDrive 'teams-only_Email.log')) | Should -BeFalse
@@ -165,7 +165,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         $result.StdOut | Should -Match 'EmailItemsExported=2'
         $result.StdOut | Should -Match 'EmailOutputPath=.*_Email\.db'
         $result.StdOut | Should -Match 'EmailLogPath=.*_Email\.log'
-        (Test-Path -LiteralPath (Join-Path $TestDrive 'email-only_Teams.html')) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $TestDrive 'email-only_Teams.db')) | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $TestDrive 'email-only_Teams.log')) | Should -BeFalse
     }
 
@@ -206,7 +206,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
     It 'runs the launcher sample path successfully with all four reports by default' {
         $reportPath = Join-Path $TestDrive 'launcher-sample.html'
         $logPath = Join-Path $TestDrive 'launcher-sample.log'
-        $teamsReportPath = Join-Path $TestDrive 'launcher-sample_Teams.html'
+        $teamsReportPath = Join-Path $TestDrive 'launcher-sample_Teams.db'
         $emailReportPath = Join-Path $TestDrive 'launcher-sample_Email.db'
         $calendarReportPath = Join-Path $TestDrive 'launcher-sample_Calendar.html'
         $contactsReportPath = Join-Path $TestDrive 'launcher-sample_Contacts.html'
@@ -317,13 +317,13 @@ Describe 'Purview Teams PST to HTML verification suite' {
     }
 
     It 'builds debug and release executables' -Tag 'Build' {
-        $version = '1.3.1.0'
+        $version = '1.4.1.0'
         $result = & $script:invokePwshScriptCapture -FilePath $script:buildScriptPath -Arguments @('-Version', $version)
 
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter_Debug.exe')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $script:buildDir 'PurviewTeamsPstToHtmlConverter.exe')) | Should -BeTrue
-        $result.StdOut | Should -Match 'built 1.3.1.0'
+        $result.StdOut | Should -Match 'built 1.4.1.0'
     }
 
     It 'release no-console executable completes NoGui sample mode without interaction' -Tag 'Build' {
@@ -353,7 +353,7 @@ Describe 'Purview Teams PST to HTML verification suite' {
         }
 
         foreach ($name in @(
-            'release-nogui_Teams.html',
+            'release-nogui_Teams.db',
             'release-nogui_Calendar.html',
             'release-nogui_Contacts.html',
             'release-nogui_Teams.log',

@@ -30,19 +30,26 @@ internal static class Program
                 : args.Length > 0 ? DatabaseArgument.Resolve(args[0]) : null;
 
             ApplicationConfiguration.Initialize();
-            using var form = new MainForm(databasePath);
-            if (smoke)
+            while (true)
             {
-                var timer = new System.Windows.Forms.Timer { Interval = 2000 };
-                timer.Tick += (_, _) =>
+                ReportViewerSession.RequestedPath = null;
+                using var form = await CreateReviewFormAsync(databasePath);
+                if (smoke)
                 {
-                    timer.Stop();
-                    form.Close();
-                };
-                form.Shown += (_, _) => timer.Start();
+                    var timer = new System.Windows.Forms.Timer { Interval = 2000 };
+                    timer.Tick += (_, _) =>
+                    {
+                        timer.Stop();
+                        form.Close();
+                    };
+                    form.Shown += (_, _) => timer.Start();
+                }
+                Application.Run(form);
+                if (string.IsNullOrWhiteSpace(ReportViewerSession.RequestedPath))
+                    return 0;
+                databasePath = ReportViewerSession.RequestedPath;
+                smoke = false;
             }
-            Application.Run(form);
-            return 0;
         }
         catch (Exception exception)
         {
@@ -61,15 +68,39 @@ internal static class Program
             : int.TryParse(expectedText, out var parsed) && parsed >= 0
                 ? parsed
                 : throw new ArgumentException("--expected-count must be a non-negative integer.");
-        var result = await EmailNdjsonImporter.ImportAsync(inputPath, databasePath, expectedCount);
-        Console.WriteLine(JsonSerializer.Serialize(new
+        var kindText = GetOption(args, "--kind") ?? "email";
+        object result;
+        if (kindText.Equals("teams", StringComparison.OrdinalIgnoreCase))
         {
-            mode = "import",
-            inputPath,
-            databasePath = result.DatabasePath,
-            inputCount = result.InputCount,
-            importedCount = result.ImportedCount
-        }));
+            var imported = await TeamsNdjsonImporter.ImportAsync(inputPath, databasePath, expectedCount);
+            result = new
+            {
+                mode = "import",
+                kind = "teams",
+                inputPath,
+                databasePath = imported.DatabasePath,
+                inputCount = imported.InputCount,
+                importedCount = imported.ImportedCount
+            };
+        }
+        else if (kindText.Equals("email", StringComparison.OrdinalIgnoreCase))
+        {
+            var imported = await EmailNdjsonImporter.ImportAsync(inputPath, databasePath, expectedCount);
+            result = new
+            {
+                mode = "import",
+                kind = "email",
+                inputPath,
+                databasePath = imported.DatabasePath,
+                inputCount = imported.InputCount,
+                importedCount = imported.ImportedCount
+            };
+        }
+        else
+        {
+            throw new ArgumentException("--kind must be email or teams.");
+        }
+        Console.WriteLine(JsonSerializer.Serialize(result));
         return 0;
     }
 
@@ -169,6 +200,24 @@ internal static class Program
             results
         }, JsonOptions));
         return 0;
+    }
+
+    private static async Task<Form> CreateReviewFormAsync(string? databasePath)
+    {
+        if (string.IsNullOrWhiteSpace(databasePath))
+            return new MainForm(null);
+
+        try
+        {
+            var kind = await ReportDatabaseKindDetector.DetectAsync(databasePath);
+            return kind == ReportDatabaseKind.Teams
+                ? new TeamsReviewForm(databasePath)
+                : new MainForm(databasePath);
+        }
+        catch (InvalidDataException)
+        {
+            return new MainForm(databasePath);
+        }
     }
 
     private static string GetPath(string[] args, int index)

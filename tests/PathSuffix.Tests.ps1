@@ -10,6 +10,7 @@ Describe 'Report path naming' {
     }
     It 'strips report suffixes from base' {
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Teams.html' | Should -Be 'LArtley Messages'
+        Get-ReportPathBaseName 'C:\out\LArtley Messages_Teams.db' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Email.html' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Email.db' | Should -Be 'LArtley Messages'
         Get-ReportPathBaseName 'C:\out\LArtley Messages_Calendar.html' | Should -Be 'LArtley Messages'
@@ -48,7 +49,7 @@ Describe 'Report path naming' {
     It 'multiple selected -> display base and write typed sibling outputs' {
         $r = Get-ReportOutputPaths -DisplayPath 'C:\out\LArtley Messages.html' -TeamsReport $true -EmailReport $true -CalendarReport $true -ContactsReport $true
         $r.DisplayPath | Should -Be 'C:\out\LArtley Messages.html'
-        $r.TeamsPath | Should -Be 'C:\out\LArtley Messages_Teams.html'
+        $r.TeamsPath | Should -Be 'C:\out\LArtley Messages_Teams.db'
         $r.EmailPath | Should -Be 'C:\out\LArtley Messages_Email.db'
         $r.CalendarPath | Should -Be 'C:\out\LArtley Messages_Calendar.html'
         $r.ContactsPath | Should -Be 'C:\out\LArtley Messages_Contacts.html'
@@ -56,15 +57,15 @@ Describe 'Report path naming' {
 
     It 'Teams only -> display and write _Teams' {
         $r = Get-ReportOutputPaths -DisplayPath 'C:\out\LArtley Messages.html' -TeamsReport $true -EmailReport $false -CalendarReport $false -ContactsReport $false
-        $r.DisplayPath | Should -Be 'C:\out\LArtley Messages_Teams.html'
-        $r.TeamsPath | Should -Be 'C:\out\LArtley Messages_Teams.html'
+        $r.DisplayPath | Should -Be 'C:\out\LArtley Messages_Teams.db'
+        $r.TeamsPath | Should -Be 'C:\out\LArtley Messages_Teams.db'
         $r.EmailPath | Should -BeNullOrEmpty
         $r.CalendarPath | Should -BeNullOrEmpty
         $r.ContactsPath | Should -BeNullOrEmpty
     }
 
     It 'Email only -> display and write _Email' {
-        $r = Get-ReportOutputPaths -DisplayPath 'C:\out\LArtley Messages_Teams.html' -TeamsReport $false -EmailReport $true -CalendarReport $false -ContactsReport $false
+        $r = Get-ReportOutputPaths -DisplayPath 'C:\out\LArtley Messages_Teams.db' -TeamsReport $false -EmailReport $true -CalendarReport $false -ContactsReport $false
         $r.DisplayPath | Should -Be 'C:\out\LArtley Messages_Email.db'
         $r.EmailPath | Should -Be 'C:\out\LArtley Messages_Email.db'
         $r.TeamsPath | Should -BeNullOrEmpty
@@ -75,8 +76,8 @@ Describe 'Report path naming' {
     It 'keeps new path flags optional and false for legacy direct helper callers' {
         $r = Get-ReportOutputPaths -DisplayPath 'C:\out\Legacy.html' -TeamsReport $true -EmailReport $false
 
-        $r.DisplayPath | Should -Be 'C:\out\Legacy_Teams.html'
-        $r.TeamsPath | Should -Be 'C:\out\Legacy_Teams.html'
+        $r.DisplayPath | Should -Be 'C:\out\Legacy_Teams.db'
+        $r.TeamsPath | Should -Be 'C:\out\Legacy_Teams.db'
         $r.EmailPath | Should -BeNullOrEmpty
         $r.CalendarPath | Should -BeNullOrEmpty
         $r.ContactsPath | Should -BeNullOrEmpty
@@ -118,7 +119,7 @@ Describe 'Report path naming' {
         $fields = @{
             OutputPath = 'C:\out\LArtley Messages.html'
             LogPath = 'C:\out\LArtley Messages.log'
-            TeamsOutputPath = 'C:\out\LArtley Messages_Teams.html'
+            TeamsOutputPath = 'C:\out\LArtley Messages_Teams.db'
             EmailOutputPath = 'C:\out\LArtley Messages_Email.db'
             CalendarOutputPath = 'C:\out\LArtley Messages_Calendar.html'
             ContactsOutputPath = 'C:\out\LArtley Messages_Contacts.html'
@@ -129,7 +130,7 @@ Describe 'Report path naming' {
         }
         $w = Get-WritePathsFromResultFields -Fields $fields
         $w.ReportPaths | Should -Be @(
-            'C:\out\LArtley Messages_Teams.html',
+            'C:\out\LArtley Messages_Teams.db',
             'C:\out\LArtley Messages_Email.db',
             'C:\out\LArtley Messages_Calendar.html',
             'C:\out\LArtley Messages_Contacts.html'
@@ -146,11 +147,72 @@ Describe 'Report path naming' {
 
     It 'single-mode result fields fall back to OutputPath when typed paths absent' {
         $fields = @{
-            OutputPath = 'C:\out\LArtley Messages_Teams.html'
+            OutputPath = 'C:\out\LArtley Messages_Teams.db'
             LogPath = 'C:\out\LArtley Messages_Teams.log'
         }
         $w = Get-WritePathsFromResultFields -Fields $fields
-        $w.ReportPaths | Should -Be @('C:\out\LArtley Messages_Teams.html')
+        $w.ReportPaths | Should -Be @('C:\out\LArtley Messages_Teams.db')
         $w.LogPaths | Should -Be @('C:\out\LArtley Messages_Teams.log')
+    }
+
+    It 'names the Downloads subfolder after the PST file' {
+        Get-SafePstFolderName -PstPath 'D:\Offboards\lhaltom@perfectionlearning.com.001.pst' |
+            Should -Be 'lhaltom@perfectionlearning.com.001'
+        Get-SafePstFolderName -PstPath 'C:\exports\jane doe.pst' |
+            Should -Be 'jane doe'
+        Get-SafePstFolderName -PstPath 'C:\exports\bad<>name.pst' |
+            Should -Be 'bad__name'
+        Get-SafePstFolderName -PstPath 'C:\exports\.pst' |
+            Should -Be 'PurviewPstReport'
+    }
+
+    It 'nests Downloads-root files into a PST-named subfolder and leaves other folders alone' {
+        $downloads = 'C:\Users\someone\Downloads'
+        $pst = 'D:\Offboards\lhaltom@perfectionlearning.com.001.pst'
+        $folder = 'lhaltom@perfectionlearning.com.001'
+
+        Resolve-PathInPstDownloadsFolder -FilePath (Join-Path $downloads 'lhaltom Messages.html') -PstPath $pst -DownloadsDirectory $downloads |
+            Should -Be (Join-Path (Join-Path $downloads $folder) 'lhaltom Messages.html')
+        Resolve-PathInPstDownloadsFolder -FilePath (Join-Path $downloads 'lhaltom Messages.log') -PstPath $pst -DownloadsDirectory $downloads |
+            Should -Be (Join-Path (Join-Path $downloads $folder) 'lhaltom Messages.log')
+        Resolve-PathInPstDownloadsFolder -FilePath (Join-Path $downloads.ToLowerInvariant() 'report.html') -PstPath $pst -DownloadsDirectory $downloads |
+            Should -Be (Join-Path (Join-Path $downloads $folder) 'report.html')
+
+        $custom = 'C:\Reports\lhaltom Messages.html'
+        Resolve-PathInPstDownloadsFolder -FilePath $custom -PstPath $pst -DownloadsDirectory $downloads |
+            Should -Be $custom
+        $alreadyNested = Join-Path (Join-Path $downloads 'ExistingFolder') 'lhaltom Messages.html'
+        Resolve-PathInPstDownloadsFolder -FilePath $alreadyNested -PstPath $pst -DownloadsDirectory $downloads |
+            Should -Be $alreadyNested
+    }
+
+    It 'keeps PST Downloads-folder helpers textually synchronized across all sources' {
+        $functionNames = @('Get-SafePstFolderName', 'Resolve-PathInPstDownloadsFolder')
+        $paths = @(
+            (Join-Path $PSScriptRoot '..\src\ReportPathNaming.ps1'),
+            (Join-Path $PSScriptRoot '..\src\Convert-PurviewTeamsPstToHtml.ps1'),
+            (Join-Path $PSScriptRoot '..\src\Start-PurviewTeamsPstToHtmlApp.ps1')
+        )
+        foreach ($functionName in $functionNames) {
+            $definitions = foreach ($path in $paths) {
+                $tokens = $null
+                $errors = $null
+                $ast = [Management.Automation.Language.Parser]::ParseFile(
+                    [IO.Path]::GetFullPath($path),
+                    [ref]$tokens,
+                    [ref]$errors)
+                $errors | Should -BeNullOrEmpty
+                $functionAst = $ast.Find({
+                    param($node)
+                    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                    $node.Name -eq $functionName
+                }, $true)
+                $functionAst | Should -Not -BeNullOrEmpty -Because "$functionName must exist in $path"
+                $functionAst.Extent.Text -replace "`r`n", "`n"
+            }
+
+            $definitions[1] | Should -BeExactly $definitions[0]
+            $definitions[2] | Should -BeExactly $definitions[0]
+        }
     }
 }

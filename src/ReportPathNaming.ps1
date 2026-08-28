@@ -27,7 +27,7 @@ function Get-ReportOutputPaths {
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
     $inputExt = [IO.Path]::GetExtension($DisplayPath)
     $isLogPath = $inputExt -in @('.log', '.txt')
-    $teamsExt = if ($isLogPath) { $inputExt } else { '.html' }
+    $teamsExt = if ($isLogPath) { $inputExt } else { '.db' }
     $emailExt = if ($isLogPath) { $inputExt } else { '.db' }
     $calendarExt = if ($isLogPath) { $inputExt } else { '.html' }
     $contactsExt = if ($isLogPath) { $inputExt } else { '.html' }
@@ -94,4 +94,37 @@ function Get-WritePathsFromResultFields {
         ReportPaths = $reportPaths.ToArray()
         LogPaths = $logPaths.ToArray()
     }
+}
+
+function Get-SafePstFolderName {
+    param([Parameter(Mandatory = $true)][string]$PstPath)
+    $name = [IO.Path]::GetFileNameWithoutExtension($PstPath)
+    if ([string]::IsNullOrWhiteSpace($name)) { return 'PurviewPstReport' }
+    foreach ($char in [IO.Path]::GetInvalidFileNameChars()) {
+        $name = $name.Replace([string]$char, '_')
+    }
+    $name = $name.Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { return 'PurviewPstReport' }
+    return $name
+}
+
+function Resolve-PathInPstDownloadsFolder {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$PstPath,
+        [Parameter(Mandatory = $true)][string]$DownloadsDirectory
+    )
+    $dir = [IO.Path]::GetDirectoryName($FilePath)
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = $DownloadsDirectory }
+    try {
+        $dirFull = [IO.Path]::GetFullPath($dir).TrimEnd('\')
+        $downloadsFull = [IO.Path]::GetFullPath($DownloadsDirectory).TrimEnd('\')
+    }
+    catch {
+        return $FilePath
+    }
+    if ($dirFull -ine $downloadsFull) { return $FilePath }
+    $fileName = [IO.Path]::GetFileName($FilePath)
+    if ([string]::IsNullOrWhiteSpace($fileName)) { return $FilePath }
+    return (Join-Path (Join-Path $DownloadsDirectory (Get-SafePstFolderName -PstPath $PstPath)) $fileName)
 }

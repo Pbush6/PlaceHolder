@@ -30,10 +30,20 @@ public class DatabaseArgumentTests
         Assert.Equal(Path.GetFullPath(path), DatabaseArgument.Resolve(url));
     }
 
+    [Fact]
+    public void Resolve_DecodesTeamsProtocolUrl()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "Review files", "case (final)_Teams.db");
+        var url = DatabaseArgument.TeamsProtocolScheme + Uri.EscapeDataString(path);
+
+        Assert.Equal(Path.GetFullPath(path), DatabaseArgument.Resolve(url));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("purview-email:")]
+    [InlineData("purview-teams:")]
     public void Resolve_RejectsEmptyArguments(string argument)
     {
         Assert.Throws<ArgumentException>(() => DatabaseArgument.Resolve(argument));

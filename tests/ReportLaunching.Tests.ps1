@@ -93,7 +93,7 @@ Describe 'Report launching' {
     }
 
     It 'accepts all four typed result paths and exported counts' {
-        $line = 'CONVERSION_RESULT|OutputPath=C:\Reports\case.html|LogPath=C:\Reports\case.log|ItemsExported=6|TeamsOutputPath=C:\Reports\case_Teams.html|EmailOutputPath=C:\Reports\case_Email.db|CalendarOutputPath=C:\Reports\case_Calendar.html|ContactsOutputPath=C:\Reports\case_Contacts.html|TeamsLogPath=C:\Reports\case_Teams.log|EmailLogPath=C:\Reports\case_Email.log|CalendarLogPath=C:\Reports\case_Calendar.log|ContactsLogPath=C:\Reports\case_Contacts.log|TeamsItemsExported=2|EmailItemsExported=2|CalendarItemsExported=1|ContactsItemsExported=1'
+        $line = 'CONVERSION_RESULT|OutputPath=C:\Reports\case.html|LogPath=C:\Reports\case.log|ItemsExported=6|TeamsOutputPath=C:\Reports\case_Teams.db|EmailOutputPath=C:\Reports\case_Email.db|CalendarOutputPath=C:\Reports\case_Calendar.html|ContactsOutputPath=C:\Reports\case_Contacts.html|TeamsLogPath=C:\Reports\case_Teams.log|EmailLogPath=C:\Reports\case_Email.log|CalendarLogPath=C:\Reports\case_Calendar.log|ContactsLogPath=C:\Reports\case_Contacts.log|TeamsItemsExported=2|EmailItemsExported=2|CalendarItemsExported=1|ContactsItemsExported=1'
         $parsed = ConvertFrom-ResultLine -ResultLine $line
         $paths = Get-WritePathsFromResultFields -Fields $parsed
 

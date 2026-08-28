@@ -102,6 +102,8 @@ $script:LogWriters = @()
 $script:DashboardOutputPath = $null
 $script:EmailLaunchHelperPath = $null
 $script:EmailReportUrl = $null
+$script:TeamsLaunchHelperPath = $null
+$script:TeamsReportUrl = $null
 
 function ConvertTo-NormalizedInputPath {
     param([AllowNull()][string]$Path)
@@ -536,7 +538,7 @@ function Get-ReportOutputPaths {
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
     $inputExt = [IO.Path]::GetExtension($DisplayPath)
     $isLogPath = $inputExt -in @('.log', '.txt')
-    $teamsExt = if ($isLogPath) { $inputExt } else { '.html' }
+    $teamsExt = if ($isLogPath) { $inputExt } else { '.db' }
     $emailExt = if ($isLogPath) { $inputExt } else { '.db' }
     $calendarExt = if ($isLogPath) { $inputExt } else { '.html' }
     $contactsExt = if ($isLogPath) { $inputExt } else { '.html' }
@@ -563,6 +565,41 @@ function Get-DashboardOutputPath {
     $dir = [IO.Path]::GetDirectoryName($DisplayPath)
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = (Get-Location).Path }
     return (Join-Path $dir ((Get-ReportPathBaseName -FilePath $DisplayPath) + '_Dashboard.html'))
+}
+
+# ponytail: keep in sync with ReportPathNaming.ps1
+function Get-SafePstFolderName {
+    param([Parameter(Mandatory = $true)][string]$PstPath)
+    $name = [IO.Path]::GetFileNameWithoutExtension($PstPath)
+    if ([string]::IsNullOrWhiteSpace($name)) { return 'PurviewPstReport' }
+    foreach ($char in [IO.Path]::GetInvalidFileNameChars()) {
+        $name = $name.Replace([string]$char, '_')
+    }
+    $name = $name.Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { return 'PurviewPstReport' }
+    return $name
+}
+
+# ponytail: keep in sync with ReportPathNaming.ps1
+function Resolve-PathInPstDownloadsFolder {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$PstPath,
+        [Parameter(Mandatory = $true)][string]$DownloadsDirectory
+    )
+    $dir = [IO.Path]::GetDirectoryName($FilePath)
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = $DownloadsDirectory }
+    try {
+        $dirFull = [IO.Path]::GetFullPath($dir).TrimEnd('\')
+        $downloadsFull = [IO.Path]::GetFullPath($DownloadsDirectory).TrimEnd('\')
+    }
+    catch {
+        return $FilePath
+    }
+    if ($dirFull -ine $downloadsFull) { return $FilePath }
+    $fileName = [IO.Path]::GetFileName($FilePath)
+    if ([string]::IsNullOrWhiteSpace($fileName)) { return $FilePath }
+    return (Join-Path (Join-Path $DownloadsDirectory (Get-SafePstFolderName -PstPath $PstPath)) $fileName)
 }
 
 # ponytail: keep in sync with ReportClassification.ps1
@@ -1180,6 +1217,7 @@ th { background: #edf2fb; text-align: left; }
 '@
 }
 
+# ponytail: unused after Teams SQLite
 function Get-ReportScript {
     return @'
 (function () {
@@ -2131,6 +2169,7 @@ function Get-SampleRecord {
     }
 }
 
+# ponytail: unused after Teams SQLite
 function Write-HtmlReport {
     param(
         [Parameter(Mandatory = $true)][object]$Records,
@@ -3868,9 +3907,9 @@ function Get-DashboardReportEntries {
             Key = 'teams'; Name = 'Teams'; OutputPath = $script:TeamsOutputPath
             ItemCount = $script:Stats.TeamsItemsExported
             Counts = @([pscustomobject]@{ Label = 'Total messages'; Value = $script:Stats.TeamsItemsExported })
-            Description = 'Chat and channel messages grouped into conversations.'
-            LinkPath = $script:TeamsOutputPath
-            Note = 'Opens in your default browser.'
+            Description = 'Searchable conversation database for Teams Review Viewer.'
+            LinkPath = if ($script:TeamsReportUrl) { $script:TeamsReportUrl } else { $script:TeamsLaunchHelperPath }
+            Note = 'Starts Teams Review Viewer; your browser asks for permission the first time. If it is blocked, run Open-TeamsReport.cmd from the output folder.'
         },
         [pscustomobject]@{
             Key = 'email'; Name = 'Email'; OutputPath = $script:EmailOutputPath
@@ -3913,12 +3952,64 @@ function Format-DashboardNumber {
 }
 
 function ConvertTo-DashboardHref {
-    # Report links are siblings of the dashboard file, so only the file name is needed. The Email
-    # card instead carries a purview-email: URL, which is already a finished href.
+    # Report links are siblings of the dashboard file, so only the file name is needed. Teams and
+    # Email cards instead carry purview-teams: / purview-email: URLs, which are already finished hrefs.
     param([AllowNull()][string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
     if ($Path -match '(?i)^purview-email:') { return $Path }
+    if ($Path -match '(?i)^purview-teams:') { return $Path }
     return [Uri]::EscapeDataString([IO.Path]::GetFileName($Path))
+}
+
+function Get-TeamsReportProtocolUrl {
+    param([Parameter(Mandatory = $true)][string]$DatabasePath)
+    return ('purview-teams:' + [Uri]::EscapeDataString([IO.Path]::GetFullPath($DatabasePath)))
+}
+
+function Register-TeamsReportProtocolHandler {
+    param(
+        [Parameter(Mandatory = $true)][string]$ViewerPath,
+        [string]$RegistryPath = 'HKCU:\Software\Classes\purview-teams'
+    )
+
+    $commandPath = Join-Path $RegistryPath 'shell\open\command'
+    New-Item -Path $commandPath -Force | Out-Null
+    Set-ItemProperty -LiteralPath $RegistryPath -Name '(default)' -Value 'URL:Purview Teams Report'
+    Set-ItemProperty -LiteralPath $RegistryPath -Name 'URL Protocol' -Value ''
+    Set-ItemProperty -LiteralPath $commandPath -Name '(default)' -Value ('"{0}" "%1"' -f $ViewerPath)
+}
+
+function Write-TeamsReportLaunchHelper {
+    param(
+        [Parameter(Mandatory = $true)][string]$DatabasePath,
+        [Parameter(Mandatory = $true)][string]$HelperPath
+    )
+
+    $viewerPath = ''
+    try { $viewerPath = Resolve-EmailViewerExecutable }
+    catch { Write-ReportLog "Teams Review Viewer was not found while writing the launch helper. $($_.Exception.Message)" 'WARN' }
+
+    $lines = @(
+        '@echo off',
+        'setlocal',
+        ('set "DB=%~dp0' + [IO.Path]::GetFileName($DatabasePath) + '"'),
+        'set "VIEWER=%PURVIEW_TEAMS_VIEWER_PATH%"',
+        ('if not defined VIEWER set "VIEWER=' + $viewerPath + '"'),
+        'if not exist "%DB%" goto :nodatabase',
+        'if not exist "%VIEWER%" goto :noviewer',
+        'start "" "%VIEWER%" "%DB%"',
+        'exit /b 0',
+        ':nodatabase',
+        'echo Teams database not found beside this file: %DB%',
+        'pause',
+        'exit /b 1',
+        ':noviewer',
+        'echo Teams Review Viewer was not found: %VIEWER%',
+        'echo Keep EmailReviewViewer.App.exe with the converter, or set PURVIEW_TEAMS_VIEWER_PATH to it.',
+        'pause',
+        'exit /b 1'
+    )
+    [IO.File]::WriteAllLines($HelperPath, $lines, [Text.UTF8Encoding]::new($false))
 }
 
 function Get-EmailReportProtocolUrl {
@@ -4087,6 +4178,83 @@ function ConvertTo-EmailImportDate {
     return ([datetime]$Value).ToUniversalTime().ToString('o')
 }
 
+function ConvertTo-TeamsAttachmentsText {
+    param([AllowNull()][string]$AttachmentsHtml)
+    if ([string]::IsNullOrWhiteSpace($AttachmentsHtml)) { return '' }
+    $names = [regex]::Matches($AttachmentsHtml, '(?is)<tr[^>]*>\s*<td[^>]*>(.*?)</td>') | ForEach-Object {
+        [System.Net.WebUtility]::HtmlDecode(($_.Groups[1].Value -replace '<[^>]+>', '').Trim())
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    return (@($names) -join '; ')
+}
+
+function Write-TeamsDatabase {
+    param(
+        [Parameter(Mandatory = $true)][object]$Records,
+        [Parameter(Mandatory = $true)][string]$DatabasePath
+    )
+
+    $viewerPath = Resolve-EmailViewerExecutable
+    $stagingPath = $DatabasePath + '.staging.ndjson'
+    $writer = [IO.StreamWriter]::new($stagingPath, $false, [Text.UTF8Encoding]::new($false))
+    try {
+        foreach ($record in @($Records)) {
+            $preview = @(([string]$record.BodyText -split '\r?\n') |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -First 1)
+            $previewText = if ($preview.Count) { [string]$preview[0] } else { '' }
+            if ($previewText.Length -gt 500) { $previewText = $previewText.Substring(0, 500) }
+            $participants = @($record.Participants | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $payload = [ordered]@{
+                FolderPath         = [string]$record.FolderPath
+                SenderName         = [string]$record.SenderName
+                SenderAddress      = [string]$record.SenderEmail
+                SenderDisplay      = [string]$record.SenderDisplay
+                Participants       = ($participants -join '||')
+                ConversationKey    = [string]$record.ConversationKey
+                ConversationTitle  = [string]$record.ConversationTitle
+                Subject            = [string]$record.Subject
+                SentUtc            = ConvertTo-EmailImportDate $record.SentOn
+                ReceivedUtc        = ConvertTo-EmailImportDate $record.ReceivedTime
+                Preview            = $previewText
+                BodyText           = [string]$record.BodyText
+                MessageClass       = [string]$record.MessageClass
+                EntryId            = [string]$record.EntryId
+                AttachmentsText    = ConvertTo-TeamsAttachmentsText ([string]$record.AttachmentsHtml)
+                ToRecipients       = [string]$record.To
+                CcRecipients       = [string]$record.Cc
+            }
+            $writer.WriteLine(($payload | ConvertTo-Json -Compress -Depth 3))
+        }
+    }
+    finally {
+        $writer.Dispose()
+    }
+
+    Write-ReportLog "Importing Teams SQLite database from staging file: $stagingPath"
+    Write-ConversionStage -Stage 'ImportingTeamsDatabase'
+    $psi = [Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $viewerPath
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    foreach ($argument in @('--import', $stagingPath, '--database', $DatabasePath, '--kind', 'teams', '--expected-count', [string]@($Records).Count)) {
+        [void]$psi.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($psi)
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.Result
+    $stderr = $stderrTask.Result
+    if ($process.ExitCode -ne 0) {
+        throw "Teams database import failed with exit code $($process.ExitCode). Staging file retained at $stagingPath. $stderr"
+    }
+    Remove-Item -LiteralPath $stagingPath -Force
+    Write-ReportLog "Teams database importer completed: $stdout"
+}
+
 function Write-EmailDatabase {
     param(
         [Parameter(Mandatory = $true)][object]$Records,
@@ -4159,6 +4327,8 @@ function Invoke-ReportConversion {
     }
 
     Assert-StaForOutlookCom
+    $script:TeamsReportUrl = $null
+    $script:EmailReportUrl = $null
 
     $downloads = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -4179,6 +4349,8 @@ function Invoke-ReportConversion {
     $baseName = [IO.Path]::GetFileNameWithoutExtension($pstItem.Name) -replace '[^a-zA-Z0-9._-]', '_'
     $displayHtmlPath = Resolve-OutputFilePath -Path $OutputPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.html"
     $displayLogPath = Resolve-OutputFilePath -Path $LogPath -DefaultDirectory $downloads -DefaultFileName "PurviewTeamsPst_ConversationReport_$baseName`_$stamp.log"
+    $displayHtmlPath = Resolve-PathInPstDownloadsFolder -FilePath $displayHtmlPath -PstPath $pstItem.Name -DownloadsDirectory $downloads
+    $displayLogPath = Resolve-PathInPstDownloadsFolder -FilePath $displayLogPath -PstPath $pstItem.Name -DownloadsDirectory $downloads
     $htmlPaths = Get-ReportOutputPaths -DisplayPath $displayHtmlPath -TeamsReport $TeamsReport -EmailReport $EmailReport -CalendarReport $CalendarReport -ContactsReport $ContactsReport
     $logPaths = Get-ReportOutputPaths -DisplayPath $displayLogPath -TeamsReport $TeamsReport -EmailReport $EmailReport -CalendarReport $CalendarReport -ContactsReport $ContactsReport
 
@@ -4193,6 +4365,10 @@ function Invoke-ReportConversion {
     $script:DashboardOutputPath = Get-DashboardOutputPath -DisplayPath $displayHtmlPath
     $script:EmailLaunchHelperPath = if ($EmailReport) {
         Join-Path ([IO.Path]::GetDirectoryName($script:DashboardOutputPath)) 'Open-EmailReport.cmd'
+    }
+    else { $null }
+    $script:TeamsLaunchHelperPath = if ($TeamsReport) {
+        Join-Path ([IO.Path]::GetDirectoryName($script:DashboardOutputPath)) 'Open-TeamsReport.cmd'
     }
     else { $null }
     $script:OutputPath = @(
@@ -4326,9 +4502,9 @@ function Invoke-ReportConversion {
         Write-ReportLog "Finished reading PST. Teams items: $($teamsRecords.Count); Email items: $($emailRecords.Count); Calendar items: $($calendarRecords.Count); Contacts items: $($contactsRecords.Count)"
         Write-ConversionStage -Stage 'FinishedReading'
         if ($TeamsReport) {
-            Write-ReportLog 'Writing Teams HTML report.'
-            Write-HtmlReport -Records $teamsRecords.ToArray() -PstItem $pstItem -ReportPath $script:TeamsOutputPath
-            Write-ReportLog "HTML report written to $script:TeamsOutputPath"
+            Write-ReportLog 'Writing Teams SQLite database.'
+            Write-TeamsDatabase -Records $teamsRecords.ToArray() -DatabasePath $script:TeamsOutputPath
+            Write-ReportLog "Teams SQLite database written to $script:TeamsOutputPath"
         }
         if ($EmailReport) {
             Write-ReportLog 'Writing Email SQLite database.'
@@ -4344,6 +4520,18 @@ function Invoke-ReportConversion {
             Write-ReportLog 'Writing Contacts HTML report.'
             Write-ContactsHtmlReport -Records $contactsRecords.ToArray() -PstItem $pstItem -ReportPath $script:ContactsOutputPath -LogPath $script:ContactsLogPath
             Write-ReportLog "Contacts HTML report written to $script:ContactsOutputPath"
+        }
+        if ($TeamsReport) {
+            Write-TeamsReportLaunchHelper -DatabasePath $script:TeamsOutputPath -HelperPath $script:TeamsLaunchHelperPath
+            Write-ReportLog "Teams launch helper written to $script:TeamsLaunchHelperPath"
+            try {
+                Register-TeamsReportProtocolHandler -ViewerPath (Resolve-EmailViewerExecutable)
+                $script:TeamsReportUrl = Get-TeamsReportProtocolUrl -DatabasePath $script:TeamsOutputPath
+                Write-ReportLog 'Registered the purview-teams protocol handler for the current user.'
+            }
+            catch {
+                Write-ReportLog "Could not register the purview-teams protocol handler; the dashboard will link to the launch helper instead. $($_.Exception.Message)" 'WARN'
+            }
         }
         if ($EmailReport) {
             Write-EmailReportLaunchHelper -DatabasePath $script:EmailOutputPath -HelperPath $script:EmailLaunchHelperPath

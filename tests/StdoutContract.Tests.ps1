@@ -28,7 +28,7 @@ Describe 'Stdout JSON schema contract' {
                 RunId = $script:validRunId
                 OutputPath = 'C:\Reports\case.html'
                 LogPath = 'C:\Reports\case.log'
-                TeamsOutputPath = 'C:\Reports\case_Teams.html'
+                TeamsOutputPath = 'C:\Reports\case_Teams.db'
                 EmailOutputPath = 'C:\Reports\case_Email.db'
                 CalendarOutputPath = 'C:\Reports\case_Calendar.html'
                 ContactsOutputPath = 'C:\Reports\case_Contacts.html'

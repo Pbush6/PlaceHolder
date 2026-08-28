@@ -224,7 +224,7 @@ function Invoke-PackagedNoGuiSmoke {
     }
 
     $requiredArtifacts = @(
-        'release-smoke_Teams.html',
+        'release-smoke_Teams.db',
         'release-smoke_Email.db',
         'release-smoke_Calendar.html',
         'release-smoke_Contacts.html',

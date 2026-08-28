@@ -43,6 +43,10 @@ Describe 'Conversion dashboard report' {
             $script:EmailLogPath = $null
             $script:CalendarLogPath = $null
             $script:ContactsLogPath = $null
+            $script:EmailLaunchHelperPath = $null
+            $script:EmailReportUrl = $null
+            $script:TeamsLaunchHelperPath = $null
+            $script:TeamsReportUrl = $null
         }
 
         $script:invokePwshScriptCapture = {
@@ -65,7 +69,7 @@ Describe 'Conversion dashboard report' {
     }
 
     It 'defines the dashboard writer, path helper, and email launch helper writer' {
-        foreach ($name in @('Write-DashboardHtmlReport', 'Get-DashboardOutputPath', 'Write-EmailReportLaunchHelper', 'Get-DashboardReportEntries', 'Register-EmailReportProtocolHandler', 'Get-EmailReportProtocolUrl')) {
+        foreach ($name in @('Write-DashboardHtmlReport', 'Get-DashboardOutputPath', 'Write-EmailReportLaunchHelper', 'Write-TeamsReportLaunchHelper', 'Get-DashboardReportEntries', 'Register-EmailReportProtocolHandler', 'Register-TeamsReportProtocolHandler', 'Get-EmailReportProtocolUrl', 'Get-TeamsReportProtocolUrl')) {
             $functionAst = $script:coreAst.Find({
                 param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
@@ -96,22 +100,26 @@ Describe 'Conversion dashboard report' {
 
         $dashboardPath = Join-Path $TestDrive 'dashboard-all_Dashboard.html'
         $helperPath = Join-Path $TestDrive 'Open-EmailReport.cmd'
+        $teamsHelperPath = Join-Path $TestDrive 'Open-TeamsReport.cmd'
 
         $result.ExitCode | Should -Be 0
         $result.StdOut | Should -Match 'DashboardOutputPath=.*dashboard-all_Dashboard\.html'
         (Test-Path -LiteralPath $dashboardPath -PathType Leaf) | Should -BeTrue
         (Test-Path -LiteralPath $helperPath -PathType Leaf) | Should -BeTrue
+        (Test-Path -LiteralPath $teamsHelperPath -PathType Leaf) | Should -BeTrue
 
         $dashboardHtml = Get-Content -LiteralPath $dashboardPath -Raw
         foreach ($reportKey in @('teams', 'email', 'calendar', 'contacts')) {
             $dashboardHtml | Should -Match ("data-report='{0}'" -f $reportKey)
         }
-        $dashboardHtml | Should -Match 'dashboard-all_Teams\.html'
+        $dashboardHtml | Should -Match 'dashboard-all_Teams\.db'
         $dashboardHtml | Should -Match 'dashboard-all_Calendar\.html'
         $dashboardHtml | Should -Match 'dashboard-all_Contacts\.html'
         $dashboardHtml | Should -Match 'Open-EmailReport\.cmd'
+        $dashboardHtml | Should -Match 'Open-TeamsReport\.cmd'
         $dashboardHtml | Should -Match 'dashboard-all_Email\.db'
         $dashboardHtml | Should -Match "href='purview-email:[^']*dashboard-all_Email\.db'"
+        $dashboardHtml | Should -Match "href='purview-teams:[^']*dashboard-all_Teams\.db'"
         $dashboardHtml | Should -Match "class='dashboard-open'"
         ([regex]::Matches($dashboardHtml, "class='dashboard-open'[^>]*target='_blank'")).Count |
             Should -Be 4 -Because 'reports open in a new tab so the dashboard stays available'
@@ -127,6 +135,9 @@ Describe 'Conversion dashboard report' {
         $helperText = Get-Content -LiteralPath $helperPath -Raw
         $helperText | Should -Match 'dashboard-all_Email\.db'
         $helperText | Should -Match 'EmailReviewViewer\.App\.exe'
+        $teamsHelperText = Get-Content -LiteralPath $teamsHelperPath -Raw
+        $teamsHelperText | Should -Match 'dashboard-all_Teams\.db'
+        $teamsHelperText | Should -Match 'PURVIEW_TEAMS_VIEWER_PATH'
     }
 
     It 'omits cards for reports that were not produced and skips the helper without Email' {
@@ -161,7 +172,7 @@ Describe 'Conversion dashboard report' {
     }
 
     It 'reports exported counts and read warnings from run statistics' {
-        $script:TeamsOutputPath = Join-Path $TestDrive 'counts_Teams.html'
+        $script:TeamsOutputPath = Join-Path $TestDrive 'counts_Teams.db'
         $script:TeamsLogPath = Join-Path $TestDrive 'counts_Teams.log'
         $script:Stats.ItemReadFailures = 4
         $script:Stats.AttachmentReadFailures = 7
@@ -196,6 +207,33 @@ Describe 'Conversion dashboard report' {
             Register-EmailReportProtocolHandler -ViewerPath $viewerPath -RegistryPath $registryPath
 
             (Get-ItemProperty -LiteralPath $registryPath).'(default)' | Should -Be 'URL:Purview Email Report'
+            (Get-ItemProperty -LiteralPath $registryPath).'URL Protocol' | Should -Be ''
+            (Get-ItemProperty -LiteralPath (Join-Path $registryPath 'shell\open\command')).'(default)' |
+                Should -Be ('"{0}" "%1"' -f $viewerPath)
+        }
+        finally {
+            Remove-Item -LiteralPath 'HKCU:\Software\PurviewTeamsPstToHtmlAppTests' -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'builds a purview-teams URL that survives spaces and reserved characters' {
+        $databasePath = Join-Path $TestDrive 'Review files\case (final) & more_Teams.db'
+
+        $url = Get-TeamsReportProtocolUrl -DatabasePath $databasePath
+
+        $url | Should -BeLike 'purview-teams:*'
+        $url | Should -Not -Match '[ &]'
+        [Uri]::UnescapeDataString($url.Substring('purview-teams:'.Length)) |
+            Should -Be ([IO.Path]::GetFullPath($databasePath))
+    }
+
+    It 'registers the purview-teams handler against the viewer executable' {
+        $registryPath = 'HKCU:\Software\PurviewTeamsPstToHtmlAppTests\purview-teams'
+        $viewerPath = Join-Path $TestDrive 'EmailReviewViewer.App.exe'
+        try {
+            Register-TeamsReportProtocolHandler -ViewerPath $viewerPath -RegistryPath $registryPath
+
+            (Get-ItemProperty -LiteralPath $registryPath).'(default)' | Should -Be 'URL:Purview Teams Report'
             (Get-ItemProperty -LiteralPath $registryPath).'URL Protocol' | Should -Be ''
             (Get-ItemProperty -LiteralPath (Join-Path $registryPath 'shell\open\command')).'(default)' |
                 Should -Be ('"{0}" "%1"' -f $viewerPath)

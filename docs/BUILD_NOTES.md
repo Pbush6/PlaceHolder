@@ -2,6 +2,25 @@
 
 Generated: 2026-07-03
 
+## Version 1.4.1.0 packaging (2026-08-28)
+
+- Teams viewer renders the original Teams HTML stylesheet in WebView2, with an Open Database button in the hero.
+- Large reports write `report.html` and navigate via a virtual host (WebView2 `NavigateToString` is capped at 2 MB).
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.4.1.0-win-x64.zip`.
+- ZIP SHA-256: `1B4DF9823C9FC4D87AB47150073A89A7FAC0299F3AD611F56CE672D72AFEC53E`.
+
+## Version 1.4.0.0 packaging (2026-08-28)
+
+- Teams output is `_Teams.db` reviewed in Email Review Viewer with the Teams HTML conversation layout (people filters, match modes, conversation and message cards).
+- Dashboard Teams cards use `purview-teams:`; `Open-TeamsReport.cmd` is the fallback.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.4.0.0-win-x64.zip`.
+
+## Version 1.3.2.0 packaging (2026-08-27)
+
+- Downloads-root report and log files are written into a new subfolder named after the PST file.
+- GUI copy now says a dashboard will launch with links to Email, Teams, Contacts, and Calendar reports.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.3.2.0-win-x64.zip`.
+
 ## Version 1.3.1.0 packaging (2026-08-21)
 
 - Contacts HTML ships an Outlook People three-pane view grouped Internal, External, and Schools.
