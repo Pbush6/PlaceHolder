@@ -262,10 +262,10 @@ public sealed class TeamsReviewForm : Form
     {
         var selectedSet = _selected.ToHashSet(StringComparer.Ordinal);
         return new TeamsReportHtmlModel(
-            PstName: _store.Repository is null ? "" : Path.GetFileName(_store.Repository.DatabasePath),
+            PstName: TeamsReportHtml.ResolvePstName(_folders, _store.Repository?.DatabasePath),
             Generated: _store.Repository is null
                 ? "—"
-                : File.GetLastWriteTime(_store.Repository.DatabasePath).ToString("yyyy-MM-dd HH:mm:ss K"),
+                : TeamsReportHtml.FormatGenerated(File.GetLastWriteTime(_store.Repository.DatabasePath)),
             MessageCount: _summary?.MessageCount ?? 0,
             PeopleCount: _summary?.PeopleCount ?? 0,
             FolderCount: _summary?.FolderCount ?? 0,

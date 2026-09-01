@@ -2,6 +2,12 @@
 
 Generated: 2026-07-03
 
+## Version 1.4.3.0 packaging (2026-09-01)
+
+- Teams To/Cc list people first, then Other/IDs; filter heading keeps corpus-wide totals; Generated is `yyyy-MM-dd HH:mm` plus a timezone abbreviation; PST card uses the Outlook store / PST file name.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.4.3.0-win-x64.zip`.
+- ZIP SHA-256: `A20C63F218F60E9D846594A3D9699E9437DE20A3CE836A6963CA5ED29504E6F0`.
+
 ## Version 1.4.2.0 packaging (2026-08-28)
 
 - Teams person filter applies immediately on the loaded cards (same as the HTML report), then refreshes from SQLite.

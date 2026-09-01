@@ -16,6 +16,30 @@ public static class TeamsParticipantMatching
             ? []
             : value.Split("||", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
+    public static string FormatRecipientsPeopleFirst(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var parts = value.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return "";
+        if (parts.Length == 1)
+            return parts[0];
+
+        var people = new List<string>();
+        var others = new List<string>();
+        foreach (var part in parts)
+        {
+            if (IsLikelyPersonName(part))
+                people.Add(part);
+            else
+                others.Add(part);
+        }
+
+        return string.Join("; ", people.Concat(others));
+    }
+
     public static bool IsLikelyPersonName(string? value)
     {
         var name = value?.Trim() ?? "";

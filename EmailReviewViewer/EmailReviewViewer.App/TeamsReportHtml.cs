@@ -230,8 +230,8 @@ public static class TeamsReportHtml
         html.Append($"<div><strong>Subject:</strong> {Enc(message.Subject)}</div>");
         html.Append($"<div><strong>Message class:</strong> {Enc(message.MessageClass)}</div>");
         html.Append($"<div><strong>From:</strong> {Enc(message.SenderName)} &lt;{Enc(message.SenderAddress)}&gt;</div>");
-        html.Append($"<div><strong>To:</strong> {Enc(message.ToRecipients)}</div>");
-        html.Append($"<div><strong>Cc:</strong> {Enc(message.CcRecipients)}</div>");
+        html.Append($"<div><strong>To:</strong> {Enc(TeamsParticipantMatching.FormatRecipientsPeopleFirst(message.ToRecipients))}</div>");
+        html.Append($"<div><strong>Cc:</strong> {Enc(TeamsParticipantMatching.FormatRecipientsPeopleFirst(message.CcRecipients))}</div>");
         html.Append($"<div><strong>Sent:</strong> {Enc(FormatDetailDate(message.SentUtc))}</div>");
         html.Append($"<div><strong>Received:</strong> {Enc(FormatDetailDate(message.ReceivedUtc))}</div>");
         html.Append($"<div><strong>Entry ID:</strong> <span class='wrap'>{Enc(message.EntryId)}</span></div>");
@@ -253,6 +253,36 @@ public static class TeamsReportHtml
         if (names.Count > 4)
             return string.Join(", ", names.Take(4)) + ", ...";
         return string.Join(", ", names);
+    }
+
+    public static string ResolvePstName(IReadOnlyList<FolderCount> folders, string? databasePath)
+    {
+        foreach (var folder in folders ?? [])
+        {
+            var root = folder.FolderPath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(root))
+                continue;
+            return root.EndsWith(".pst", StringComparison.OrdinalIgnoreCase) ? root : root + ".pst";
+        }
+
+        return string.IsNullOrWhiteSpace(databasePath) ? "" : Path.GetFileName(databasePath);
+    }
+
+    public static string FormatGenerated(DateTime value, TimeZoneInfo? timeZone = null)
+    {
+        var tz = timeZone ?? TimeZoneInfo.Local;
+        var local = value.Kind == DateTimeKind.Utc
+            ? TimeZoneInfo.ConvertTimeFromUtc(value, tz)
+            : value.Kind == DateTimeKind.Local && !tz.Equals(TimeZoneInfo.Local)
+                ? TimeZoneInfo.ConvertTime(value, TimeZoneInfo.Local, tz)
+                : value;
+        var zoneTime = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        var name = tz.IsDaylightSavingTime(zoneTime) ? tz.DaylightName : tz.StandardName;
+        var abbreviation = string.Concat(
+            name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => char.ToUpperInvariant(part[0])));
+        return local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " " + abbreviation;
     }
 
     private static string FormatDetailDate(DateTime? value) =>
@@ -300,7 +330,6 @@ public static class TeamsReportHtml
           const resizeHandle = document.getElementById('resizeHandle');
           const conversationList = document.getElementById('conversationList');
           const conversations = Array.from(document.querySelectorAll('.conversation'));
-          const resultCount = document.getElementById('resultCount');
           let debounce = null;
           let posting = false;
 
@@ -351,8 +380,6 @@ public static class TeamsReportHtml
             const startDate = startDateFilter ? startDateFilter.value : '';
             const endDate = endDateFilter ? endDateFilter.value : '';
             const text = (messageSearch ? messageSearch.value : '').trim().toLowerCase();
-            let visibleConversations = 0;
-            let visibleMessages = 0;
             conversations.forEach(conversation => {
               const conversationTextOk = !text || (conversation._searchText || '').includes(text);
               const messages = Array.from(conversation.querySelectorAll('.message-card'));
@@ -375,10 +402,8 @@ public static class TeamsReportHtml
               const countEl = conversation.querySelector('.conversation-count');
               if (countEl) countEl.textContent = (selected.length > 0 || text) ? (conversationVisibleMessages + ' of ' + messages.length + ' messages') : (messages.length + ' messages');
               conversation.hidden = !showConversation;
-              if (showConversation) { visibleConversations += 1; visibleMessages += conversationVisibleMessages; }
             });
             sortConversations();
-            if (resultCount) resultCount.textContent = visibleConversations + ' conversations / ' + visibleMessages + ' messages shown';
           }
           function post(message) {
             if (!window.chrome || !window.chrome.webview) return;

@@ -1,3 +1,4 @@
+using System.Globalization;
 using EmailReviewViewer.App;
 using EmailReviewViewer.App.Data;
 
@@ -65,6 +66,55 @@ public sealed class TeamsReportHtmlTests
         Assert.Contains("c.addEventListener('change'", html);
     }
 
+    [Theory]
+    [InlineData("2026-01-15T12:30:45", "2026-01-15 12:30 CST")]
+    [InlineData("2026-07-15T12:30:45", "2026-07-15 12:30 CDT")]
+    public void FormatGenerated_omits_seconds_and_uses_a_timezone_abbreviation(string localTime, string expected)
+    {
+        var when = DateTime.Parse(localTime, CultureInfo.InvariantCulture);
+        var central = TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+
+        Assert.Equal(expected, TeamsReportHtml.FormatGenerated(when, central));
+    }
+
+    [Theory]
+    [InlineData(@"LArtley@perfectionlearning.com.001\TeamsMessagesData", "LArtley@perfectionlearning.com.001.pst")]
+    [InlineData(@"SamplePst\TeamsMessagesData", "SamplePst.pst")]
+    [InlineData(@"export.pst\TeamsMessagesData", "export.pst")]
+    public void ResolvePstName_uses_the_Outlook_store_name_from_folder_paths(string folderPath, string expected)
+    {
+        var folders = new[] { new FolderCount(folderPath, 4) };
+
+        Assert.Equal(expected, TeamsReportHtml.ResolvePstName(folders, @"C:\temp\LArtley Messages_Teams.db"));
+    }
+
+    [Fact]
+    public void ResolvePstName_falls_back_to_the_database_file_when_folders_are_missing()
+    {
+        Assert.Equal(
+            "LArtley Messages_Teams.db",
+            TeamsReportHtml.ResolvePstName([], @"C:\temp\LArtley Messages_Teams.db"));
+    }
+
+    [Fact]
+    public void Filter_heading_shows_filtered_totals_for_the_whole_result_not_the_current_page()
+    {
+        var model = SampleModel() with
+        {
+            ConversationCount = 872,
+            VisibleMessageCount = 13653,
+            PageIndex = 0,
+            PageSize = 25
+        };
+
+        var html = TeamsReportHtml.Build(model);
+
+        Assert.Contains("id='resultCount'", html);
+        Assert.Contains("872 conversations / 13,653 messages shown", html);
+        Assert.Contains("1–25 of 872", html);
+        Assert.DoesNotContain("resultCount.textContent = visibleConversations", html);
+    }
+
     [Fact]
     public void WriteReport_persists_html_larger_than_the_WebView2_NavigateToString_limit()
     {
@@ -101,6 +151,45 @@ public sealed class TeamsReportHtmlTests
             if (Directory.Exists(directory))
                 Directory.Delete(directory, true);
         }
+    }
+
+    [Fact]
+    public void Details_To_and_Cc_list_ids_and_emails_after_people()
+    {
+        var model = SampleModel() with
+        {
+            Conversations =
+            [
+                new TeamsConversationHtml(
+                    new TeamsConversationListItem("chat-1", DateTime.UtcNow, "Bot chat", "Linda Artley||Torey Page", 1, 1),
+                    [
+                        new TeamsMessage
+                        {
+                            SenderDisplay = "Torey Page",
+                            Participants = "Linda Artley||Torey Page",
+                            ConversationTitle = "Bot chat",
+                            BodyText = "Hello.",
+                            ToRecipients = "28:fd931076-bbfb-4a38-a85c-1f0fb5b61bee; Linda Artley; Torey Page",
+                            CcRecipients = "19:meeting-thread; jane@example.com; Linda Artley"
+                        }
+                    ])
+            ]
+        };
+
+        var html = TeamsReportHtml.Build(model);
+
+        Assert.Contains(
+            "<strong>To:</strong> Linda Artley; Torey Page; 28:fd931076-bbfb-4a38-a85c-1f0fb5b61bee",
+            html);
+        Assert.Contains(
+            "<strong>Cc:</strong> Linda Artley; 19:meeting-thread; jane@example.com",
+            html);
+        Assert.DoesNotContain(
+            "<strong>To:</strong> 28:fd931076-bbfb-4a38-a85c-1f0fb5b61bee; Linda Artley; Torey Page",
+            html);
+        Assert.DoesNotContain(
+            "<strong>Cc:</strong> 19:meeting-thread; jane@example.com; Linda Artley",
+            html);
     }
 
     [Fact]

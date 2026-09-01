@@ -2,7 +2,7 @@
 
 Converts a Microsoft Purview eDiscovery PST into searchable Teams, Email, Calendar, and Contacts reports.
 
-**Current version:** 1.4.2.0
+**Current version:** 1.4.3.0
 **Status:** Independent Cursor project (not the Hermes originals/output tree)
 
 ## What it does
@@ -77,7 +77,7 @@ The suite covers:
 From this folder:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.4.2.0
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.4.3.0
 ```
 
 Outputs:
@@ -139,7 +139,14 @@ Expect `ItemsExported=6`, `TeamsItemsExported=2`, `EmailItemsExported=2`, `Calen
 | Deliverables / EXEs | `...\Cursor Output\PurviewTeamsPstToHtmlApp` |
 | Hermes originals (do not edit) | `...\Hermes Working Directory\PurviewTeamsPstToHtmlApp` |
 
-## Recent changes (version 1.4.2.0, 2026-08-28)
+## Recent changes (version 1.4.3.0, 2026-09-01)
+
+- Teams Details To/Cc list people first, then bots, thread IDs, and emails.
+- The people-filter heading shows filtered conversation and message totals for the whole result, not the current page.
+- The Generated card uses hours and minutes plus a timezone abbreviation (no seconds or GMT offset).
+- The PST card shows the source PST name from folder paths, not the `_Teams.db` file name.
+
+## Earlier changes (version 1.4.2.0, 2026-08-28)
 
 - Teams person checkboxes filter the loaded conversation cards immediately, then refresh from SQLite so large databases stay in sync.
 - Involving and exact-match modes count every participant in a conversation, not only the first sender’s roster.

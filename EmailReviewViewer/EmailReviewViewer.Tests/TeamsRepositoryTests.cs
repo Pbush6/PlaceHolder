@@ -40,6 +40,17 @@ public sealed class TeamsRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_totals_cover_the_full_filtered_set_not_the_page()
+    {
+        using var repository = await CreateSeededRepositoryAsync();
+        var page = await repository.SearchConversationsAsync(new TeamsQuery(Limit: 1));
+
+        Assert.Single(page.Items);
+        Assert.Equal(2, page.TotalCount);
+        Assert.Equal(3, page.VisibleMessageCount);
+    }
+
+    [Fact]
     public async Task Keyword_filter_matches_fts_body_without_returning_other_conversations()
     {
         using var repository = await CreateSeededRepositoryAsync();

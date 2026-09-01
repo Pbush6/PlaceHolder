@@ -315,10 +315,10 @@ Describe 'Release artifact verification contracts' {
         (Test-Path -LiteralPath (Join-Path $script:repoRoot 'test-output\verify-stop-process-tree.html')) | Should -BeFalse
     }
 
-    It 'documents completed 1.4.2.0 version alignment without stale drift language' {
+    It 'documents completed 1.4.3.0 version alignment without stale drift language' {
         $text = Get-Content -LiteralPath $script:contractsPath -Raw
-        $text | Should -Match '\*\*Version:\*\*\s*1\.4\.2\.0'
-        $text | Should -Match '1\.4\.2\.0'
+        $text | Should -Match '\*\*Version:\*\*\s*1\.4\.3\.0'
+        $text | Should -Match '1\.4\.3\.0'
         $text | Should -Not -Match 'Current drift to resolve before release'
     }
 }
