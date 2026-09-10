@@ -98,13 +98,13 @@ public static class TeamsReportHtml
         html.Append("</select></div>");
         html.Append("<div class='people-heading'><h3>People</h3><button type='button' class='secondary' id='clearAll'>Clear filters</button></div>");
         html.Append("<div id='peopleBox' class='people-box'>");
-        html.Append("<label class='person-option'><input type='checkbox' id='selectAllPeople'/> <span>Select All</span></label>");
+        html.Append(SelectAllOption("selectAllPeople", AllSelected(model.People, selected)));
         foreach (var person in model.People)
             html.Append(PersonOption(person, selected.Contains(person)));
         html.Append("</div>");
         html.Append($"<details class='other-names'><summary>Other detected names / IDs ({model.OtherNames.Count})</summary>");
         html.Append("<div id='otherPeopleBox' class='people-box'>");
-        html.Append("<label class='person-option'><input type='checkbox' id='selectAllOther'/> <span>Select All</span></label>");
+        html.Append(SelectAllOption("selectAllOther", AllSelected(model.OtherNames, selected)));
         foreach (var name in model.OtherNames)
             html.Append(PersonOption(name, selected.Contains(name)));
         html.Append("</div></details>");
@@ -291,6 +291,15 @@ public static class TeamsReportHtml
     private static string SummaryCard(string label, string value) =>
         $"<div class='summary-card'><div class='label'>{Enc(label)}</div><div class='value'>{Enc(value)}</div></div>";
 
+    private static bool AllSelected(IReadOnlyList<string> names, HashSet<string> selected) =>
+        names.Count > 0 && names.All(selected.Contains);
+
+    private static string SelectAllOption(string id, bool isChecked)
+    {
+        var check = isChecked ? " checked='checked'" : "";
+        return $"<label class='person-option'><input type='checkbox' id='{Enc(id)}'{check}/> <span>Select All</span></label>";
+    }
+
     private static string PersonOption(string name, bool isChecked)
     {
         var check = isChecked ? " checked='checked'" : "";
@@ -470,6 +479,13 @@ public static class TeamsReportHtml
               event.preventDefault();
             });
           }
+          function syncSelectAll(selectAllCheckbox, groupId) {
+            if (!selectAllCheckbox) return;
+            const group = document.getElementById(groupId);
+            if (!group) return;
+            const boxes = Array.from(group.querySelectorAll('.person-check'));
+            selectAllCheckbox.checked = boxes.length > 0 && boxes.every(c => c.checked);
+          }
           function setGroupChecked(selectAllCheckbox, groupId) {
             if (!selectAllCheckbox) return;
             const group = document.getElementById(groupId);
@@ -479,7 +495,12 @@ public static class TeamsReportHtml
             postQuery();
           }
 
-          checks.forEach(c => c.addEventListener('change', () => { applyFilters(); scheduleQuery(); }));
+          checks.forEach(c => c.addEventListener('change', () => {
+            syncSelectAll(selectAllPeople, 'peopleBox');
+            syncSelectAll(selectAllOther, 'otherPeopleBox');
+            applyFilters();
+            scheduleQuery();
+          }));
           if (personSearch) personSearch.addEventListener('input', filterPersonList);
           if (messageSearch) messageSearch.addEventListener('input', () => { applyFilters(); scheduleQuery(); });
           if (participantMatchMode) participantMatchMode.addEventListener('change', () => { applyFilters(); postQuery(); });
@@ -510,6 +531,8 @@ public static class TeamsReportHtml
           if (openDatabase) openDatabase.addEventListener('click', () => post({ action: 'openDatabase' }));
           setupColumnResize();
           filterPersonList();
+          syncSelectAll(selectAllPeople, 'peopleBox');
+          syncSelectAll(selectAllOther, 'otherPeopleBox');
           applyFilters();
         })();
         """;

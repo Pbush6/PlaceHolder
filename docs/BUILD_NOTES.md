@@ -2,6 +2,12 @@
 
 Generated: 2026-07-03
 
+## Version 1.4.4.0 packaging (2026-09-02)
+
+- Teams Select All stays checked after it selects every name in that group; unchecking it clears the group.
+- Portable release name: `PurviewTeamsPstToHtmlApp-1.4.4.0-win-x64.zip`.
+- ZIP SHA-256: `29CF1A2A5DE67277C8A097515F5DF6358A56643A973B5B1FEC3018672C5532CA`.
+
 ## Version 1.4.3.0 packaging (2026-09-01)
 
 - Teams To/Cc list people first, then Other/IDs; filter heading keeps corpus-wide totals; Generated is `yyyy-MM-dd HH:mm` plus a timezone abbreviation; PST card uses the Outlook store / PST file name.

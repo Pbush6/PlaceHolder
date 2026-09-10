@@ -55,6 +55,41 @@ public sealed class TeamsReportHtmlTests
     }
 
     [Fact]
+    public void Select_all_stays_checked_when_every_name_in_the_group_is_selected()
+    {
+        var html = TeamsReportHtml.Build(SampleModel() with
+        {
+            People = ["Linda Artley", "Torey Page"],
+            SelectedPeople = ["Linda Artley", "Torey Page"],
+            OtherNames = ["Meeting Bot"],
+            SelectedOtherNames = ["Meeting Bot"]
+        });
+
+        Assert.Contains("id='selectAllPeople' checked='checked'", html);
+        Assert.Contains("id='selectAllOther' checked='checked'", html);
+        Assert.Contains("function syncSelectAll(", html);
+        Assert.Contains("syncSelectAll(selectAllPeople, 'peopleBox')", html);
+        Assert.Contains("syncSelectAll(selectAllOther, 'otherPeopleBox')", html);
+    }
+
+    [Fact]
+    public void Select_all_stays_unchecked_when_only_some_names_are_selected()
+    {
+        var html = TeamsReportHtml.Build(SampleModel() with
+        {
+            People = ["Linda Artley", "Torey Page"],
+            SelectedPeople = ["Torey Page"],
+            OtherNames = ["Meeting Bot"],
+            SelectedOtherNames = []
+        });
+
+        Assert.Contains("id='selectAllPeople'/>", html);
+        Assert.DoesNotContain("id='selectAllPeople' checked='checked'", html);
+        Assert.Contains("id='selectAllOther'/>", html);
+        Assert.DoesNotContain("id='selectAllOther' checked='checked'", html);
+    }
+
+    [Fact]
     public void Script_filters_loaded_conversations_in_the_browser_before_asking_the_host()
     {
         var html = TeamsReportHtml.Build(SampleModel());
